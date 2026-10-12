@@ -217,4 +217,138 @@ elif menu == "📦 Stock & Inventory":
     st.subheader("Current Stock Ledger")
     st.dataframe(df_inv, use_container_width=True)
 
-    st.markdown("<br>", unsafe_allow
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("➕ Add New SKU Item")
+    
+    with st.form("add_stock_form", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        code = c1.text_input("Item Code", f"ITM-{200 + len(df_inv) + 1}")
+        name = c2.text_input("Item Name / Description")
+        category = c1.selectbox("Category", ["Hardware", "Supplies", "Software", "Services"])
+        stock = c2.number_input("Initial Stock Quantity", min_value=1, value=20)
+        price = c1.number_input("Unit Price ($)", min_value=0.1, value=50.0, step=5.0)
+
+        submitted = st.form_submit_button("Save SKU to Database")
+        if submitted:
+            if name:
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('INSERT INTO inventory VALUES (?, ?, ?, ?, ?)', (code, name, category, stock, price))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Item '{name}' [{code}] successfully added!")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error(f"Error: Item Code '{code}' already exists.")
+            else:
+                st.error("Please enter a valid Item Name.")
+
+# ==========================================
+# 6. MODULE 3: SALES & INVOICING
+# ==========================================
+elif menu == "💰 Sales & Invoicing":
+    st.title("💰 Sales & Billing")
+    st.caption("Manage customer invoices and transaction records.")
+    st.markdown("---")
+
+    conn = get_db_connection()
+    df_sales = pd.read_sql('SELECT * FROM sales', conn)
+    conn.close()
+
+    st.subheader("Sales Transaction History")
+    st.dataframe(df_sales, use_container_width=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("📄 Create New Sales Invoice")
+    
+    with st.form("add_sales_form", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        inv_no = c1.text_input("Invoice Number", f"INV-{8000 + len(df_sales) + 1}")
+        customer = c2.text_input("Customer / Business Name")
+        amount = c1.number_input("Invoice Amount ($)", min_value=1.0, value=300.0, step=10.0)
+        status = c2.selectbox("Payment Status", ["Paid", "Pending", "Cancelled"])
+        sale_date = st.date_input("Transaction Date", date.today())
+
+        sale_submitted = st.form_submit_button("Record Transaction")
+        if sale_submitted:
+            if customer:
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('INSERT INTO sales VALUES (?, ?, ?, ?, ?)', (inv_no, str(sale_date), customer, amount, status))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Invoice '{inv_no}' recorded for {customer}!")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error(f"Error: Invoice Number '{inv_no}' already exists.")
+            else:
+                st.error("Please enter a valid Customer Name.")
+
+# ==========================================
+# 7. MODULE 4: DB INSPECTOR
+# ==========================================
+elif menu == "🗄️ DB Inspector":
+    st.title("🗄️ Database Inspector")
+    st.caption(f"Inspect raw tables inside `{DB_FILE}`.")
+    st.markdown("---")
+
+    conn = get_db_connection()
+    tables = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table';", conn)
+
+    st.info(f"Active SQLite File: **`{DB_FILE}`**")
+    
+    for table_name in tables['name']:
+        st.subheader(f"Table: `{table_name}`")
+        df_table = pd.read_sql(f"SELECT * FROM {table_name}", conn)
+        st.dataframe(df_table, use_container_width=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+    conn.close()
+
+# ==========================================
+# 8. MODULE 5: REPORTS & EXPORT
+# ==========================================
+elif menu == "📥 Reports & Export":
+    st.title("📥 Reports & Data Export")
+    st.caption("Export your database records as CSV spreadsheets.")
+    st.markdown("---")
+
+    conn = get_db_connection()
+    df_inv = pd.read_sql('SELECT * FROM inventory', conn)
+    df_sales = pd.read_sql('SELECT * FROM sales', conn)
+    conn.close()
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Export Inventory Data")
+        csv_inv = df_inv.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📄 Download Inventory CSV",
+            data=csv_inv,
+            file_name="poly_inventory_report.csv",
+            mime="text/csv"
+        )
+
+    with col2:
+        st.subheader("Export Sales Ledger")
+        csv_sales = df_sales.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📄 Download Sales CSV",
+            data=csv_sales,
+            file_name="poly_sales_report.csv",
+            mime="text/csv"
+        )
+
+# ==========================================
+# 9. FOOTER
+# ==========================================
+st.markdown("---")
+st.markdown(
+    "<p style='text-align: center; color: #64748b; font-size: 13px;'>"
+    "© 2026 <b>Muzaffar Developers</b> | Low-Poly Vibrant ERP System | SQLite Embedded Core"
+    "</p>",
+    unsafe_allow_html=True
+)

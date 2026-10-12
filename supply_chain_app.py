@@ -27,10 +27,10 @@ if not db_url:
 
 @st.cache_resource
 def get_engine(url):
-if db_url.startswith("postgresql://") and not "+psycopg2" in db_url:
-  db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
-engine = create_engine(db_url)
+engine =if db_url.startswith("postgresql://") and not "+psycopg2" in db_url:
+  db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+ create_engine(db_url)
 
 
 try:

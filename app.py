@@ -71,21 +71,7 @@ st.sidebar.title("🏢 Muzaffar ERP System")
 st.sidebar.caption("Connected to SQLite Database")
 page = st.sidebar.radio("Modules", ["📊 Dashboard", "📦 Inventory Control", "💰 Sales & Billing", "📥 Export & Reports"])
 
-elif page == "🗄️ View Raw Database":
-    st.title("Raw SQLite Database Tables")
-    st.markdown("---")
-    
-    conn = get_connection()
-    
-    # Get all tables in the database
-    tables = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table';", conn)
-    
-    for table_name in tables['name']:
-        st.subheader(f"Table: `{table_name}`")
-        df_table = pd.read_sql(f"SELECT * FROM {table_name}", conn)
-        st.dataframe(df_table, use_container_width=True)
-        
-    conn.close()
+
 
 # ----------------------------------------------------
 # MODULE 1: DASHBOARD

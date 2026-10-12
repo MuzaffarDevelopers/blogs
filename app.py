@@ -4,7 +4,7 @@ import sqlite3
 from datetime import date
 
 # ==========================================
-# 1. PAGE CONFIGURATION & POLYGON LIGHT THEME
+# 1. PAGE CONFIGURATION & GEOMETRIC UI
 # ==========================================
 st.set_page_config(
     page_title="Muzaffar Developers | Poly-Vibrant ERP",
@@ -13,81 +13,87 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom Low-Poly Vibrant Light Theme CSS
+# Custom Poly-Vibrant CSS Styling matching your design reference
 POLY_CSS = """
 <style>
-    /* Clean Light Polygon Background */
+    /* Low-Poly Vibrant Multicolored Background */
     .stApp {
-        background: linear-gradient(135deg, #f8fafc 0%, #edf2f7 50%, #fef2f2 100%);
+        background: linear-gradient(135deg, rgba(255,182,193,0.35) 0%, rgba(135,206,250,0.35) 50%, rgba(152,251,152,0.35) 100%),
+                    url('https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2000&auto=format&fit=crop');
+        background-size: cover;
+        background-attachment: fixed;
+        background-blend-mode: overlay;
         color: #1e293b;
     }
     
-    /* Vibrant Gradient Headers */
+    /* High-Contrast Bold Headings */
     h1 {
-        background: linear-gradient(90deg, #2563eb, #9333ea, #db2777);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #0f172a !important;
         font-weight: 800 !important;
+        text-shadow: 0 2px 4px rgba(255,255,255,0.8);
     }
     h2, h3 {
-        color: #0f172a !important;
+        color: #1e293b !important;
+        font-weight: 700 !important;
     }
     
-    /* Frosted Glass Cards / Metrics */
+    /* Frosted Glass Sidebar */
+    section[data-testid="stSidebar"] {
+        background: rgba(255, 255, 255, 0.75) !important;
+        backdrop-filter: blur(12px);
+        border-right: 1px solid rgba(255, 255, 255, 0.6);
+    }
+    
+    /* Frosted Glass Metric Cards */
     div[data-testid="stMetric"] {
         background: rgba(255, 255, 255, 0.85);
-        border: 1px solid rgba(147, 51, 234, 0.2);
+        border: 1px solid rgba(255, 255, 255, 1);
         border-radius: 14px;
         padding: 16px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    div[data-testid="stMetric"]:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 25px rgba(147, 51, 234, 0.15);
-        border-color: #9333ea;
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+        backdrop-filter: blur(4px);
     }
     div[data-testid="stMetricValue"] {
-        color: #2563eb !important;
-        font-weight: 700;
+        color: #0284c7 !important;
+        font-weight: 800 !important;
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #475569 !important;
+        font-weight: 600 !important;
     }
     
-    /* Forms Styling */
+    /* Frosted Glass Container / Forms */
     div[data-testid="stForm"] {
-        background: rgba(255, 255, 255, 0.9);
-        border: 1px solid rgba(37, 99, 235, 0.2);
+        background: rgba(255, 255, 255, 0.85);
+        border: 1px solid rgba(255, 255, 255, 1);
         border-radius: 16px;
         padding: 24px;
-        box-shadow: 0 4px 25px rgba(0, 0, 0, 0.06);
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
+        backdrop-filter: blur(6px);
     }
     
-    /* Vibrant Multi-Color Action Buttons */
+    /* Vibrant Gradient Action Buttons */
     .stButton > button, div[data-testid="stForm"] button {
-        background: linear-gradient(135deg, #2563eb 0%, #9333ea 50%, #db2777 100%) !important;
+        background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%) !important;
         color: #ffffff !important;
-        font-weight: bold !important;
+        font-weight: 700 !important;
         border: none !important;
-        border-radius: 8px !important;
-        box-shadow: 0 4px 15px rgba(147, 51, 234, 0.3) !important;
+        border-radius: 10px !important;
+        box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4) !important;
         transition: all 0.3s ease !important;
     }
-    .stButton > button:hover, div[data-testid="stForm"] button:hover {
-        opacity: 0.95;
-        box-shadow: 0 6px 20px rgba(219, 39, 119, 0.4) !important;
-        transform: scale(1.01);
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(6, 182, 212, 0.6) !important;
     }
     
-    /* Sidebar Light Styling */
-    section[data-testid="stSidebar"] {
-        background-color: #ffffff;
-        border-right: 1px solid rgba(226, 232, 240, 1);
-    }
-    
-    /* Dataframes Theming */
+    /* High Contrast Tables */
     div[data-testid="stDataFrame"] {
-        border: 1px solid rgba(203, 213, 225, 1);
-        border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02);
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 1);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        padding: 8px;
     }
 </style>
 """
@@ -102,7 +108,7 @@ def get_db_connection():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     return conn
 
-def init_poly_db():
+def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -128,50 +134,52 @@ def init_poly_db():
         )
     ''')
     
-    # Seed Initial Data if Tables are Empty
+    # Seed Data if Empty
     cursor.execute('SELECT COUNT(*) FROM inventory')
     if cursor.fetchone()[0] == 0:
         sample_inventory = [
-            ("ITM-201", "Polygon Scanner Unit", "Hardware", 40, 130.0),
-            ("ITM-202", "Executive Passbook Printer", "Hardware", 10, 400.0),
-            ("ITM-203", "Thermal Receipt Rolls", "Supplies", 180, 3.0),
-            ("ITM-204", "ERP Enterprise License", "Software", 6, 750.0)
+            ("M10001", "Inchvok Product", "Product", 35, 1150.0),
+            ("M10002", "Product Sharper", "Product", 1250, 270.0),
+            ("M10003", "Product Hearper", "Product", 75, 38.0),
+            ("M10004", "Black Sheaper", "Product", 60, 100.0),
+            ("M10005", "Brant Flay", "Category", 15, 125.0)
         ]
         cursor.executemany('INSERT INTO inventory VALUES (?, ?, ?, ?, ?)', sample_inventory)
         
     cursor.execute('SELECT COUNT(*) FROM sales')
     if cursor.fetchone()[0] == 0:
         sample_sales = [
-            ("INV-8001", "2026-10-10", "Hamzah Sugar Mills", 2600.0, "Paid"),
-            ("INV-8002", "2026-10-11", "Bahawalpur Logistics", 900.0, "Pending"),
-            ("INV-8003", "2026-10-12", "Sadiq Industries", 1350.0, "Paid")
+            ("31001", "15/10/2022", "Customer", 1150.0, "Changed"),
+            ("31002", "09/10/2022", "Manper", 270.0, "Changed"),
+            ("31003", "06/10/2022", "Manper", 38.0, "Pending"),
+            ("31004", "17/10/2022", "Customer", 100.0, "Changed"),
+            ("31007", "08/10/2022", "Emile", 125.0, "Changed")
         ]
         cursor.executemany('INSERT INTO sales VALUES (?, ?, ?, ?, ?)', sample_sales)
         
     conn.commit()
     conn.close()
 
-# Initialize DB
-init_poly_db()
+init_db()
 
 # ==========================================
 # 3. SIDEBAR NAVIGATION
 # ==========================================
-st.sidebar.markdown("<h2 style='text-align: center; background: linear-gradient(90deg, #2563eb, #db2777); -webkit-background-clip: text; -webkit-text-fill-color: transparent;'>🎨 POLY ERP</h2>", unsafe_allow_html=True)
-st.sidebar.markdown("<p style='text-align: center; color: #64748b; font-size: 12px; font-weight: 600;'>MUZAFFAR DEVELOPERS</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<h2 style='text-align: center; color: #0f172a;'>🎨 MUZAFFAR</h2>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='text-align: center; color: #0284c7; font-weight: 700; font-size: 13px;'>DEVELOPERS PORTAL</p>", unsafe_allow_html=True)
 st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
-    "NAVIGATION MODULES",
-    ["📊 Dashboard & Analytics", "📦 Stock & Inventory", "💰 Sales & Invoicing", "🗄️ DB Inspector", "📥 Reports & Export"]
+    "NAVIGATION MENU",
+    ["📊 Dashboard", "📦 Inventory Control", "💰 Sales Invoicing", "🗄️ Database Inspector", "📥 Reports & Export"]
 )
 
 # ==========================================
-# 4. MODULE 1: DASHBOARD & ANALYTICS
+# 4. MODULE 1: DASHBOARD
 # ==========================================
-if menu == "📊 Dashboard & Analytics":
-    st.title("📊 Enterprise Overview")
-    st.caption("Live polygon-styled analytical command center.")
+if menu == "📊 Dashboard":
+    st.title("⚡ NEON ERP: COMMAND CENTER")
+    st.caption("High-contrast analytics and geometric operational overview.")
     st.markdown("---")
 
     conn = get_db_connection()
@@ -179,56 +187,56 @@ if menu == "📊 Dashboard & Analytics":
     df_sales = pd.read_sql('SELECT * FROM sales', conn)
     conn.close()
 
-    total_items = len(df_inv)
+    sku_count = len(df_inv)
     total_stock = df_inv["stock"].sum() if not df_inv.empty else 0
     total_revenue = df_sales["amount"].sum() if not df_sales.empty else 0.0
-    pending_bills = len(df_sales[df_sales["status"] == "Pending"]) if not df_sales.empty else 0
+    pending_invoices = len(df_sales[df_sales["status"] == "Pending"]) if not df_sales.empty else 0
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("SKU Catalog Count", total_items)
-    col2.metric("Total Warehouse Units", f"{total_stock:,}")
-    col3.metric("Total Revenue Ledger", f"${total_revenue:,.2f}")
-    col4.metric("Pending Invoices", pending_bills)
+    col1.metric("SKU COUNT", sku_count)
+    col2.metric("WAREHOUSE STOCK", f"{total_stock:,} units")
+    col3.metric("TOTAL REVENUE", f"${total_revenue:,.2f}")
+    col4.metric("PENDING INVOICES", pending_invoices)
 
     st.markdown("<br>", unsafe_allow_html=True)
     
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.subheader("📦 Inventory Stock Levels")
+    c_left, c_right = st.columns(2)
+    with c_left:
+        st.subheader("📦 Stock Ledger (Recently Updated)")
         if not df_inv.empty:
-            st.bar_chart(df_inv.set_index("item_name")["stock"])
-    with col_b:
-        st.subheader("💰 Revenue Trend")
+            st.dataframe(df_inv.head(5), use_container_width=True)
+            
+    with c_right:
+        st.subheader("💰 Recent Sales Transactions")
         if not df_sales.empty:
-            st.line_chart(df_sales.set_index("sale_date")["amount"])
+            st.dataframe(df_sales.head(5), use_container_width=True)
 
 # ==========================================
-# 5. MODULE 2: INVENTORY MANAGEMENT
+# 5. MODULE 2: INVENTORY CONTROL
 # ==========================================
-elif menu == "📦 Stock & Inventory":
-    st.title("📦 Inventory Management")
-    st.caption("Track and update stock items stored in SQLite.")
+elif menu == "📦 Inventory Control":
+    st.title("📦 Inventory Control & SKU Management")
     st.markdown("---")
 
     conn = get_db_connection()
     df_inv = pd.read_sql('SELECT * FROM inventory', conn)
     conn.close()
 
-    st.subheader("Current Stock Ledger")
+    st.subheader("Full Stock Database")
     st.dataframe(df_inv, use_container_width=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.subheader("➕ Add New SKU Item")
+    st.subheader("➕ Add New Stock Item")
     
-    with st.form("add_stock_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        code = c1.text_input("Item Code", f"ITM-{200 + len(df_inv) + 1}")
-        name = c2.text_input("Item Name / Description")
-        category = c1.selectbox("Category", ["Hardware", "Supplies", "Software", "Services"])
-        stock = c2.number_input("Initial Stock Quantity", min_value=1, value=20)
-        price = c1.number_input("Unit Price ($)", min_value=0.1, value=50.0, step=5.0)
+    with st.form("add_inv_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        code = col1.text_input("Item Code", f"M1000{len(df_inv)+1}")
+        name = col2.text_input("Item Name / Description")
+        category = col1.selectbox("Category", ["Product", "Category", "Hardware", "Supplies"])
+        stock = col2.number_input("Stock Quantity", min_value=1, value=50)
+        price = col1.number_input("Unit Price ($)", min_value=0.1, value=150.0, step=10.0)
 
-        submitted = st.form_submit_button("Save SKU to Database")
+        submitted = st.form_submit_button("⚡ Save New SKU")
         if submitted:
             if name:
                 try:
@@ -237,72 +245,71 @@ elif menu == "📦 Stock & Inventory":
                     cursor.execute('INSERT INTO inventory VALUES (?, ?, ?, ?, ?)', (code, name, category, stock, price))
                     conn.commit()
                     conn.close()
-                    st.success(f"Item '{name}' [{code}] successfully added!")
+                    st.success(f"Item '{name}' successfully stored in SQLite DB!")
                     st.rerun()
                 except sqlite3.IntegrityError:
                     st.error(f"Error: Item Code '{code}' already exists.")
             else:
-                st.error("Please enter a valid Item Name.")
+                st.error("Please provide an Item Name.")
 
 # ==========================================
-# 6. MODULE 3: SALES & INVOICING
+# 6. MODULE 3: SALES INVOICING
 # ==========================================
-elif menu == "💰 Sales & Invoicing":
-    st.title("💰 Sales & Billing")
-    st.caption("Manage customer invoices and transaction records.")
+elif menu == "💰 Sales Invoicing":
+    st.title("💰 Sales Ledger & Invoices")
     st.markdown("---")
 
     conn = get_db_connection()
     df_sales = pd.read_sql('SELECT * FROM sales', conn)
     conn.close()
 
-    st.subheader("Sales Transaction History")
+    st.subheader("All Sales Records")
     st.dataframe(df_sales, use_container_width=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.subheader("📄 Create New Sales Invoice")
+    st.subheader("📄 Create New Invoice")
     
-    with st.form("add_sales_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        inv_no = c1.text_input("Invoice Number", f"INV-{8000 + len(df_sales) + 1}")
-        customer = c2.text_input("Customer / Business Name")
-        amount = c1.number_input("Invoice Amount ($)", min_value=1.0, value=300.0, step=10.0)
-        status = c2.selectbox("Payment Status", ["Paid", "Pending", "Cancelled"])
+    with st.form("add_sale_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        inv_no = col1.text_input("Invoice Number", str(3100 + len(df_sales) + 1))
+        customer = col2.text_input("Customer Name")
+        amount = col1.number_input("Invoice Amount ($)", min_value=1.0, value=350.0, step=25.0)
+        status = col2.selectbox("Status", ["Changed", "Pending", "Paid"])
         sale_date = st.date_input("Transaction Date", date.today())
 
-        sale_submitted = st.form_submit_button("Record Transaction")
+        sale_submitted = st.form_submit_button("⚡ Record Invoice")
         if sale_submitted:
             if customer:
                 try:
                     conn = get_db_connection()
                     cursor = conn.cursor()
-                    cursor.execute('INSERT INTO sales VALUES (?, ?, ?, ?, ?)', (inv_no, str(sale_date), customer, amount, status))
+                    # Format date to match DD/MM/YYYY or standard YYYY-MM-DD
+                    formatted_date = sale_date.strftime("%d/%m/%Y")
+                    cursor.execute('INSERT INTO sales VALUES (?, ?, ?, ?, ?)', (inv_no, formatted_date, customer, amount, status))
                     conn.commit()
                     conn.close()
-                    st.success(f"Invoice '{inv_no}' recorded for {customer}!")
+                    st.success(f"Invoice '{inv_no}' successfully saved!")
                     st.rerun()
                 except sqlite3.IntegrityError:
                     st.error(f"Error: Invoice Number '{inv_no}' already exists.")
             else:
-                st.error("Please enter a valid Customer Name.")
+                st.error("Please enter a Customer Name.")
 
 # ==========================================
-# 7. MODULE 4: DB INSPECTOR
+# 7. MODULE 4: DATABASE INSPECTOR
 # ==========================================
-elif menu == "🗄️ DB Inspector":
-    st.title("🗄️ Database Inspector")
-    st.caption(f"Inspect raw tables inside `{DB_FILE}`.")
+elif menu == "🗄️ Database Inspector":
+    st.title("🗄️ SQLite Raw Database Inspector")
+    st.caption(f"Inspection view for `{DB_FILE}`")
     st.markdown("---")
 
     conn = get_db_connection()
     tables = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table';", conn)
 
-    st.info(f"Active SQLite File: **`{DB_FILE}`**")
-    
-    for table_name in tables['name']:
-        st.subheader(f"Table: `{table_name}`")
-        df_table = pd.read_sql(f"SELECT * FROM {table_name}", conn)
-        st.dataframe(df_table, use_container_width=True)
+    for tbl in tables['name']:
+        st.subheader(f"Table: `{tbl}`")
+        df_tbl = pd.read_sql(f"SELECT * FROM {tbl}", conn)
+        st.dataframe(df_tbl, use_container_width=True)
         st.markdown("<br>", unsafe_allow_html=True)
         
     conn.close()
@@ -311,8 +318,7 @@ elif menu == "🗄️ DB Inspector":
 # 8. MODULE 5: REPORTS & EXPORT
 # ==========================================
 elif menu == "📥 Reports & Export":
-    st.title("📥 Reports & Data Export")
-    st.caption("Export your database records as CSV spreadsheets.")
+    st.title("📥 Spreadsheet Auditing & Reports")
     st.markdown("---")
 
     conn = get_db_connection()
@@ -347,8 +353,8 @@ elif menu == "📥 Reports & Export":
 # ==========================================
 st.markdown("---")
 st.markdown(
-    "<p style='text-align: center; color: #64748b; font-size: 13px;'>"
-    "© 2026 <b>Muzaffar Developers</b> | Low-Poly Vibrant ERP System | SQLite Embedded Core"
+    "<p style='text-align: center; color: #334155; font-weight: 600; font-size: 13px;'>"
+    "© 2026 <b>Muzaffar Developers</b> | Poly-Vibrant Design & SQLite Database Core"
     "</p>",
     unsafe_allow_html=True
 )

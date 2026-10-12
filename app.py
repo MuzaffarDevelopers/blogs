@@ -1,450 +1,531 @@
-import streamlit as st
-import pandas as pd
-import sqlite3
-from datetime import date
-
-# ==========================================
-# 1. PAGE CONFIGURATION & GEOMETRIC UI
-# ==========================================
-st.set_page_config(
-    page_title="Muzaffar Developers | Grocery SaaS ERP",
-    page_icon="🛒",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom Poly-Vibrant SaaS CSS Styling
-SAAS_CSS = """
-<style>
-    .stApp {
-        background: linear-gradient(135deg, rgba(255,182,193,0.3) 0%, rgba(135,206,250,0.3) 50%, rgba(152,251,152,0.3) 100%),
-                    url('https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=2000&auto=format&fit=crop');
-        background-size: cover;
-        background-attachment: fixed;
-        background-blend-mode: overlay;
-        color: #1e293b;
-    }
-    h1, h2, h3 {
-        color: #0f172a !important;
-        font-weight: 800 !important;
-    }
-    section[data-testid="stSidebar"] {
-        background: rgba(255, 255, 255, 0.85) !important;
-        backdrop-filter: blur(12px);
-    }
-    div[data-testid="stMetric"] {
-        background: rgba(255, 255, 255, 0.9);
-        border: 1px solid rgba(255, 255, 255, 1);
-        border-radius: 14px;
-        padding: 16px;
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
-    }
-    div[data-testid="stMetricValue"] {
-        color: #0284c7 !important;
-        font-weight: 800 !important;
-    }
-    div[data-testid="stForm"] {
-        background: rgba(255, 255, 255, 0.9);
-        border: 1px solid rgba(255, 255, 255, 1);
-        border-radius: 16px;
-        padding: 24px;
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
-    }
-    .stButton > button, div[data-testid="stForm"] button {
-        background: linear-gradient(135deg, #10b981 0%, #0284c7 100%) !important;
-        color: #ffffff !important;
-        font-weight: 700 !important;
-        border: none !important;
-        border-radius: 10px !important;
-    }
-    div[data-testid="stDataFrame"] {
-        background: rgba(255, 255, 255, 0.9);
-        border-radius: 12px;
-        padding: 8px;
-    }
-</style>
+"""Grocery Store SaaS - Flask + SQLAlchemy.
+Multi-tenant: every store has its own users/products/sales, isolated by store_id.
+Run:  pip install -r requirements.txt && python app.py
 """
-st.markdown(SAAS_CSS, unsafe_allow_html=True)
+import os
+import shutil
+import secrets
+import time
+from datetime import datetime, date
+from decimal import Decimal, InvalidOperation
+from functools import wraps
 
-# ==========================================
-# 2. DATABASE ENGINE & INITIALIZATION
-# ==========================================
-DB_FILE = "grocery_saas.db"
+from flask import Flask, render_template, redirect, url_for, request, flash, abort
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import (LoginManager, UserMixin, login_user, logout_user,
+                         login_required, current_user)
+from flask_wtf.csrf import CSRFProtect
+from jinja2 import DictLoader
+from werkzeug.security import generate_password_hash, check_password_hash
 
-def get_db_connection():
-    return sqlite3.connect(DB_FILE, check_same_thread=False)
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+INSTANCE = os.path.join(BASE_DIR, "instance")
+os.makedirs(INSTANCE, exist_ok=True)
 
-def init_grocery_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # 1. Users Table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL,
-            full_name TEXT NOT NULL
-        )
-    ''')
-    
-    # 2. Grocery Inventory Table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS inventory (
-            item_code TEXT PRIMARY KEY,
-            item_name TEXT NOT NULL,
-            category TEXT NOT NULL,
-            stock_qty INTEGER NOT NULL,
-            unit_price REAL NOT NULL,
-            expiry_date TEXT
-        )
-    ''')
-    
-    # 3. POS Sales Transactions Table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sales (
-            invoice_no TEXT PRIMARY KEY,
-            sale_date TEXT NOT NULL,
-            cashier TEXT NOT NULL,
-            customer_name TEXT NOT NULL,
-            total_amount REAL NOT NULL,
-            payment_mode TEXT NOT NULL
-        )
-    ''')
-    
-    # 4. Customers Credit/Debit Ledger
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS customers (
-            customer_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            credit_balance REAL NOT NULL
-        )
-    ''')
-    
-    # Seed Default Users if empty
-    cursor.execute('SELECT COUNT(*) FROM users')
-    if cursor.fetchone()[0] == 0:
-        cursor.executemany('INSERT INTO users VALUES (?, ?, ?, ?)', [
-            ("admin", "muzaffar123", "Admin", "Muzaffar (Owner)"),
-            ("cashier1", "cashier123", "Cashier", "Store Cashier")
-        ])
-        
-    # Seed Default Grocery Items if empty
-    cursor.execute('SELECT COUNT(*) FROM inventory')
-    if cursor.fetchone()[0] == 0:
-        cursor.executemany('INSERT INTO inventory VALUES (?, ?, ?, ?, ?, ?)', [
-            ("GRO-101", "Basmati Rice (5kg)", "Grains", 45, 12.50, "2027-12-31"),
-            ("GRO-102", "Cooking Oil (1L)", "Pantry", 80, 4.20, "2026-10-15"),
-            ("GRO-103", "Whole Wheat Flour (10kg)", "Grains", 30, 9.80, "2027-06-30"),
-            ("GRO-104", "Sugar White (1kg)", "Pantry", 120, 1.50, "2028-01-01"),
-            ("GRO-105", "Fresh Whole Milk (1L)", "Dairy", 15, 1.20, "2026-10-14")
-        ])
-        
-    # Seed Default Customers if empty
-    cursor.execute('SELECT COUNT(*) FROM customers')
-    if cursor.fetchone()[0] == 0:
-        cursor.executemany('INSERT INTO customers VALUES (?, ?, ?, ?)', [
-            ("CUST-001", "Ali Khan", "+92 300 1234567", 0.0),
-            ("CUST-002", "Ahmed Raza", "+92 321 7654321", 25.50)
-        ])
-        
-    conn.commit()
-    conn.close()
 
-init_grocery_db()
+def load_secret():
+    key = os.getenv("SECRET_KEY")
+    if key:
+        return key
+    path = os.path.join(INSTANCE, "secret.key")
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            f.write(secrets.token_hex(32))
+        os.chmod(path, 0o600)
+    return open(path).read().strip()
 
-# ==========================================
-# 3. SECURE USER AUTHENTICATION
-# ==========================================
-if "user" not in st.session_state:
-    st.session_state.user = None
-if "role" not in st.session_state:
-    st.session_state.role = None
 
-if not st.session_state.user:
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        st.markdown("<h2 style='text-align: center;'>🛒 Grocery SaaS Portal</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #475569;'>Sign in to access your store terminal.</p>", unsafe_allow_html=True)
-        
-        with st.form("login_form"):
-            username_input = st.text_input("Username")
-            password_input = st.text_input("Password", type="password")
-            login_submit = st.form_submit_button("Sign In to POS")
-            
-            if login_submit:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute('SELECT role, full_name FROM users WHERE username = ? AND password = ?', (username_input, password_input))
-                user_record = cursor.fetchone()
-                conn.close()
-                
-                if user_record:
-                    st.session_state.user = user_record[1]
-                    st.session_state.role = user_record[0]
-                    st.success(f"Welcome back, {user_record[1]}!")
-                    st.rerun()
-                else:
-                    st.error("Invalid Username or Password! (Hint: admin / muzaffar123)")
-        st.stop()
+app = Flask(__name__)
+app.config.update(
+    SECRET_KEY=load_secret(),
+    SQLALCHEMY_DATABASE_URI=os.getenv(
+        "DATABASE_URL", "sqlite:///" + os.path.join(INSTANCE, "grocery.db")),
+    SQLALCHEMY_TRACK_MODIFICATIONS=False,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv("HTTPS", "0") == "1",  # set HTTPS=1 behind TLS
+    PERMANENT_SESSION_LIFETIME=60 * 60 * 8,
+    MAX_CONTENT_LENGTH=1 * 1024 * 1024,
+)
+db = SQLAlchemy(app)
+csrf = CSRFProtect(app)
+login_manager = LoginManager(app)
+login_manager.login_view = "login"
 
-# ==========================================
-# 4. SIDEBAR NAVIGATION & USER INFO
-# ==========================================
-st.sidebar.markdown(f"<h3 style='color: #0f172a;'>👤 {st.session_state.user}</h3>", unsafe_allow_html=True)
-st.sidebar.markdown(f"<p style='color: #0284c7; font-weight: bold;'>Role: {st.session_state.role}</p>", unsafe_allow_html=True)
-st.sidebar.markdown("---")
 
-menu_options = ["📊 Dashboard", "🛒 POS Billing Terminal", "📦 Inventory Manager", "👥 Customer Accounts", "📥 Sales Reports"]
-if st.session_state.role == "Admin":
-    menu_options.append("⚙️ Database Editor & Users")
+# ---------------------------------------------------------------- models
+class Store(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    created = db.Column(db.DateTime, default=datetime.utcnow)
 
-nav = st.sidebar.radio("NAVIGATION", menu_options)
 
-if st.sidebar.button("🔒 Logout"):
-    st.session_state.user = None
-    st.session_state.role = None
-    st.rerun()
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    store_id = db.Column(db.Integer, db.ForeignKey("store.id"), nullable=False, index=True)
+    username = db.Column(db.String(60), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(10), nullable=False, default="cashier")  # owner | cashier
+    active = db.Column(db.Boolean, default=True)
+    store = db.relationship("Store")
 
-# ==========================================
-# 5. MODULE 1: DASHBOARD
-# ==========================================
-if nav == "📊 Dashboard":
-    st.title("🛒 Grocery Store Overview")
-    st.markdown("---")
+    @property
+    def is_active(self):
+        return self.active
 
-    conn = get_db_connection()
-    df_inv = pd.read_sql('SELECT * FROM inventory', conn)
-    df_sales = pd.read_sql('SELECT * FROM sales', conn)
-    df_cust = pd.read_sql('SELECT * FROM customers', conn)
-    conn.close()
 
-    total_products = len(df_inv)
-    low_stock = len(df_inv[df_inv["stock_qty"] <= 15])
-    total_revenue = df_sales["total_amount"].sum() if not df_sales.empty else 0.0
-    total_customers = len(df_cust)
+class Product(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    store_id = db.Column(db.Integer, db.ForeignKey("store.id"), nullable=False, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    barcode = db.Column(db.String(50))
+    category = db.Column(db.String(60))
+    unit = db.Column(db.String(20), default="pc")
+    price_cents = db.Column(db.Integer, nullable=False, default=0)
+    stock = db.Column(db.Integer, nullable=False, default=0)
+    low_stock = db.Column(db.Integer, nullable=False, default=5)
+    active = db.Column(db.Boolean, default=True)
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Active SKUs", total_products)
-    c2.metric("Low Stock Items ⚠️", low_stock, delta_color="inverse")
-    c3.metric("Total Store Revenue", f"${total_revenue:,.2f}")
-    c4.metric("Registered Customers", total_customers)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.subheader("📦 Inventory Stock Overview")
-        if not df_inv.empty:
-            st.dataframe(df_inv[["item_code", "item_name", "stock_qty", "unit_price"]], use_container_width=True)
-    with col_b:
-        st.subheader("💰 Recent Transactions")
-        if not df_sales.empty:
-            st.dataframe(df_sales.head(5), use_container_width=True)
+class Sale(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    store_id = db.Column(db.Integer, db.ForeignKey("store.id"), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    total_cents = db.Column(db.Integer, nullable=False)
+    created = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    items = db.relationship("SaleItem", backref="sale", cascade="all, delete-orphan")
+    user = db.relationship("User")
 
-# ==========================================
-# 6. MODULE 2: POS BILLING TERMINAL
-# ==========================================
-elif nav == "🛒 POS Billing Terminal":
-    st.title("🛒 Point of Sale (POS) Terminal")
-    st.markdown("---")
 
-    conn = get_db_connection()
-    df_inv = pd.read_sql('SELECT * FROM inventory', conn)
-    df_cust = pd.read_sql('SELECT * FROM customers', conn)
-    conn.close()
+class SaleItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    sale_id = db.Column(db.Integer, db.ForeignKey("sale.id"), nullable=False)
+    name = db.Column(db.String(120), nullable=False)  # snapshot
+    price_cents = db.Column(db.Integer, nullable=False)
+    qty = db.Column(db.Integer, nullable=False)
 
-    col1, col2 = st.columns([2, 1])
 
-    with col1:
-        st.subheader("Select Products to Bill")
-        selected_item = st.selectbox("Search & Choose Grocery Item", df_inv['item_name'].tolist())
-        item_row = df_inv[df_inv['item_name'] == selected_item].iloc[0]
-        
-        st.info(f"**Code:** {item_row['item_code']} | **Price:** ${item_row['unit_price']} | **Available Stock:** {item_row['stock_qty']} units")
-        
-        qty = st.number_input("Quantity", min_value=1, max_value=int(item_row['stock_qty']) if item_row['stock_qty'] > 0 else 1, value=1)
-        
-        if "cart" not in st.session_state:
-            st.session_state.cart = []
+@login_manager.user_loader
+def load_user(uid):
+    return db.session.get(User, int(uid))
 
-        if st.button("➕ Add to Cart"):
-            st.session_state.cart.append({
-                "item_code": item_row['item_code'],
-                "item_name": selected_item,
-                "price": item_row['unit_price'],
-                "qty": qty,
-                "subtotal": item_row['unit_price'] * qty
-            })
-            st.success(f"Added {qty}x {selected_item} to cart!")
 
-    with col2:
-        st.subheader("🧾 Current Bill Cart")
-        if st.session_state.cart:
-            cart_df = pd.DataFrame(st.session_state.cart)
-            st.dataframe(cart_df[["item_name", "qty", "subtotal"]], use_container_width=True)
-            
-            grand_total = cart_df["subtotal"].sum()
-            st.markdown(f"### **Grand Total: ${grand_total:,.2f}**")
-            
-            customer_name = st.selectbox("Customer Account", df_cust['name'].tolist())
-            payment_mode = st.radio("Payment Method", ["Cash", "Credit Card", "Store Credit"])
+# ---------------------------------------------------------------- helpers
+@app.template_filter("money")
+def money(c):
+    return "{:,.2f}".format((c or 0) / 100)
 
-            if st.button("💳 Complete Checkout & Print"):
-                invoice_no = f"INV-{int(date.today().strftime('%Y%m%d'))}-{len(df_sales)+1 if 'df_sales' in locals() else 1001}"
-                try:
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    
-                    # Save Sale Transaction
-                    cursor.execute('INSERT INTO sales VALUES (?, ?, ?, ?, ?, ?)', 
-                                   (invoice_no, str(date.today()), st.session_state.user, customer_name, grand_total, payment_mode))
-                    
-                    # Deduct Stock Quantities
-                    for item in st.session_state.cart:
-                        cursor.execute('UPDATE inventory SET stock_qty = stock_qty - ? WHERE item_code = ?', 
-                                       (item['qty'], item['item_code']))
-                        
-                    conn.commit()
-                    conn.close()
-                    
-                    st.success(f"Checkout Successful! Invoice `{invoice_no}` generated.")
-                    st.session_state.cart = []
-                except Exception as e:
-                    st.error(f"Checkout Error: {e}")
-            
-            if st.button("🗑️ Clear Cart"):
-                st.session_state.cart = []
-                st.rerun()
+
+def to_cents(s):
+    try:
+        d = Decimal(s.strip())
+    except (InvalidOperation, AttributeError):
+        raise ValueError("Invalid price")
+    if d < 0 or d > Decimal("10000000"):
+        raise ValueError("Invalid price")
+    return int((d * 100).quantize(Decimal("1")))
+
+
+def to_int(s, lo=0, hi=10_000_000):
+    try:
+        n = int(s)
+    except (TypeError, ValueError):
+        raise ValueError("Invalid number")
+    if not lo <= n <= hi:
+        raise ValueError("Number out of range")
+    return n
+
+
+def owner_required(f):
+    @wraps(f)
+    @login_required
+    def wrapper(*a, **kw):
+        if current_user.role != "owner":
+            abort(403)
+        return f(*a, **kw)
+    return wrapper
+
+
+def store_product_or_404(pid):
+    p = Product.query.filter_by(id=pid, store_id=current_user.store_id, active=True).first()
+    if not p:
+        abort(404)
+    return p
+
+
+# simple login throttle (per IP+username); use Redis/Flask-Limiter when scaling out
+FAILS = {}
+MAX_FAILS, LOCK_SECS = 5, 300
+
+
+def throttled(key):
+    n, t = FAILS.get(key, (0, 0))
+    if n >= MAX_FAILS and time.time() - t < LOCK_SECS:
+        return True
+    if time.time() - t >= LOCK_SECS:
+        FAILS.pop(key, None)
+    return False
+
+
+@app.after_request
+def security_headers(resp):
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "same-origin"
+    resp.headers["Content-Security-Policy"] = (
+        "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+    if request.endpoint != "static":
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+# ---------------------------------------------------------------- auth
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        store_name = request.form.get("store_name", "").strip()
+        username = request.form.get("username", "").strip().lower()
+        pw = request.form.get("password", "")
+        if not store_name or len(username) < 3:
+            flash("Store name and a username (3+ chars) are required.", "err")
+        elif len(pw) < 10:
+            flash("Password must be at least 10 characters.", "err")
+        elif User.query.filter_by(username=username).first():
+            flash("Username already taken.", "err")
         else:
-            st.write("Cart is empty.")
+            store = Store(name=store_name)
+            db.session.add(store)
+            db.session.flush()
+            db.session.add(User(store_id=store.id, username=username, role="owner",
+                                password_hash=generate_password_hash(pw)))
+            db.session.commit()
+            flash("Store created. Please log in.", "ok")
+            return redirect(url_for("login"))
+    return render_template("register.html")
 
-# ==========================================
-# 7. MODULE 3: INVENTORY MANAGER
-# ==========================================
-elif nav == "📦 Inventory Manager":
-    st.title("📦 Grocery Inventory Control")
-    st.markdown("---")
 
-    conn = get_db_connection()
-    df_inv = pd.read_sql('SELECT * FROM inventory', conn)
-    conn.close()
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip().lower()
+        key = f"{request.remote_addr}|{username}"
+        if throttled(key):
+            flash("Too many attempts. Try again in a few minutes.", "err")
+            return render_template("login.html"), 429
+        user = User.query.filter_by(username=username).first()
+        if user and user.active and check_password_hash(user.password_hash, request.form.get("password", "")):
+            FAILS.pop(key, None)
+            login_user(user)
+            return redirect(url_for("dashboard"))
+        n, _ = FAILS.get(key, (0, 0))
+        FAILS[key] = (n + 1, time.time())
+        flash("Invalid username or password.", "err")
+    return render_template("login.html")
 
-    st.subheader("Current Stock Catalog")
-    st.dataframe(df_inv, use_container_width=True)
 
-    st.subheader("➕ Add New Grocery Item")
-    with st.form("add_grocery_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        code = c1.text_input("Item Code", f"GRO-10{len(df_inv)+1}")
-        name = c2.text_input("Item Name")
-        category = c1.selectbox("Category", ["Grains", "Pantry", "Dairy", "Beverages", "Snacks", "Household"])
-        qty = c2.number_input("Stock Quantity", min_value=1, value=50)
-        price = c1.number_input("Unit Price ($)", min_value=0.1, value=5.00, step=0.5)
-        expiry = c2.date_input("Expiry Date")
+@app.route("/logout", methods=["POST"])
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
 
-        if st.form_submit_button("Save Item to Inventory"):
-            if name:
-                try:
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('INSERT INTO inventory VALUES (?, ?, ?, ?, ?, ?)', 
-                                   (code, name, category, qty, price, str(expiry)))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"Item '{name}' added successfully!")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error(f"Item code '{code}' already exists.")
-            else:
-                st.error("Please provide an item name.")
 
-# ==========================================
-# 8. MODULE 4: CUSTOMER ACCOUNTS
-# ==========================================
-elif nav == "👥 Customer Accounts":
-    st.title("👥 Customer Ledgers & Accounts")
-    st.markdown("---")
+# ---------------------------------------------------------------- dashboard
+@app.route("/")
+@login_required
+def dashboard():
+    sid = current_user.store_id
+    start = datetime.combine(date.today(), datetime.min.time())
+    today = Sale.query.filter(Sale.store_id == sid, Sale.created >= start).all()
+    low = (Product.query.filter(Product.store_id == sid, Product.active.is_(True),
+                                Product.stock <= Product.low_stock)
+           .order_by(Product.stock).limit(20).all())
+    return render_template("dashboard.html", count=len(today),
+                           total=sum(s.total_cents for s in today), low=low)
 
-    conn = get_db_connection()
-    df_cust = pd.read_sql('SELECT * FROM customers', conn)
-    conn.close()
 
-    st.subheader("Registered Store Customers")
-    st.dataframe(df_cust, use_container_width=True)
+# ---------------------------------------------------------------- products
+def save_product(p):
+    p.name = request.form.get("name", "").strip()
+    if not p.name:
+        raise ValueError("Name is required")
+    p.barcode = request.form.get("barcode", "").strip()[:50] or None
+    p.category = request.form.get("category", "").strip()[:60] or None
+    p.unit = request.form.get("unit", "pc").strip()[:20] or "pc"
+    p.price_cents = to_cents(request.form.get("price", ""))
+    p.stock = to_int(request.form.get("stock"))
+    p.low_stock = to_int(request.form.get("low_stock", "5"))
 
-    st.subheader("➕ Register New Customer")
-    with st.form("add_customer_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        cid = c1.text_input("Customer ID", f"CUST-00{len(df_cust)+1}")
-        name = c2.text_input("Full Name")
-        phone = c1.text_input("Phone Number")
-        credit = c2.number_input("Initial Credit Balance ($)", value=0.0)
 
-        if st.form_submit_button("Save Customer"):
-            if name:
-                try:
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('INSERT INTO customers VALUES (?, ?, ?, ?)', (cid, name, phone, credit))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"Customer '{name}' registered successfully!")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("Customer ID already exists.")
-            else:
-                st.error("Please enter a customer name.")
+@app.route("/products")
+@login_required
+def products():
+    q = request.args.get("q", "").strip()
+    query = Product.query.filter_by(store_id=current_user.store_id, active=True)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(db.or_(Product.name.ilike(like), Product.barcode.ilike(like),
+                                    Product.category.ilike(like)))
+    return render_template("products.html", items=query.order_by(Product.name).all(), q=q)
 
-# ==========================================
-# 9. MODULE 5: SALES REPORTS & EXPORT
-# ==========================================
-elif nav == "📥 Sales Reports":
-    st.title("📥 Sales & Audit Reports")
-    st.markdown("---")
 
-    conn = get_db_connection()
-    df_sales = pd.read_sql('SELECT * FROM sales', conn)
-    df_inv = pd.read_sql('SELECT * FROM inventory', conn)
-    conn.close()
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("Export Sales Ledger")
-        st.download_button("📄 Download Sales CSV", df_sales.to_csv(index=False).encode('utf-8'), "grocery_sales_report.csv", "text/csv")
-    with c2:
-        st.subheader("Export Inventory Catalog")
-        st.download_button("📄 Download Inventory CSV", df_inv.to_csv(index=False).encode('utf-8'), "grocery_inventory_report.csv", "text/csv")
-
-# ==========================================
-# 10. MODULE 6: ADMIN DATABASE & USERS EDITOR
-# ==========================================
-elif nav == "⚙️ Database Editor & Users" and st.session_state.role == "Admin":
-    st.title("⚙️ Secure Database & User Management")
-    st.caption("Admin control panel for live table editing and user credentials.")
-    st.markdown("---")
-
-    table_choice = st.selectbox("Select Database Table to Edit", ["inventory", "customers", "users", "sales"])
-
-    conn = get_db_connection()
-    df_current = pd.read_sql(f"SELECT * FROM {table_choice}", conn)
-    conn.close()
-
-    st.info("💡 **Editable Grid:** Double click any cell below to update records or delete rows directly, then click **Save Database Changes**.")
-    
-    edited_df = st.data_editor(df_current, use_container_width=True, num_rows="dynamic")
-
-    if st.button("💾 Save Database Changes"):
+@app.route("/products/new", methods=["GET", "POST"])
+@owner_required
+def product_new():
+    if request.method == "POST":
+        p = Product(store_id=current_user.store_id)
         try:
-            conn = get_db_connection()
-            edited_df.to_sql(table_choice, conn, if_exists='replace', index=False)
-            conn.close()
-            st.success(f"Table `{table_choice}` successfully updated in SQLite!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error updating database: {e}")
+            save_product(p)
+            db.session.add(p)
+            db.session.commit()
+            flash("Product added.", "ok")
+            return redirect(url_for("products"))
+        except ValueError as e:
+            flash(str(e), "err")
+    return render_template("product_form.html", p=None)
 
-# Footer
-st.markdown("---")
-st.markdown("<p style='text-align: center; color: #334155; font-weight: 600; font-size: 13px;'>© 2026 Muzaffar Developers | Grocery Store SaaS & POS System</p>", unsafe_allow_html=True)
+
+@app.route("/products/<int:pid>/edit", methods=["GET", "POST"])
+@owner_required
+def product_edit(pid):
+    p = store_product_or_404(pid)
+    if request.method == "POST":
+        try:
+            save_product(p)
+            db.session.commit()
+            flash("Product updated.", "ok")
+            return redirect(url_for("products"))
+        except ValueError as e:
+            db.session.rollback()
+            flash(str(e), "err")
+    return render_template("product_form.html", p=p)
+
+
+@app.route("/products/<int:pid>/delete", methods=["POST"])
+@owner_required
+def product_delete(pid):
+    p = store_product_or_404(pid)
+    p.active = False  # soft delete keeps sales history intact
+    db.session.commit()
+    flash("Product removed.", "ok")
+    return redirect(url_for("products"))
+
+
+# ---------------------------------------------------------------- POS / sales
+@app.route("/pos", methods=["GET", "POST"])
+@login_required
+def pos():
+    items = (Product.query.filter_by(store_id=current_user.store_id, active=True)
+             .order_by(Product.name).all())
+    if request.method == "POST":
+        lines, total = [], 0
+        try:
+            for p in items:
+                raw = request.form.get(f"qty_{p.id}", "").strip()
+                if not raw or raw == "0":
+                    continue
+                qty = to_int(raw, 1, 100000)
+                if qty > p.stock:
+                    raise ValueError(f"Not enough stock for {p.name} (have {p.stock})")
+                lines.append((p, qty))
+                total += p.price_cents * qty
+            if not lines:
+                raise ValueError("Enter a quantity for at least one product")
+        except ValueError as e:
+            flash(str(e), "err")
+            return render_template("pos.html", items=items)
+        sale = Sale(store_id=current_user.store_id, user_id=current_user.id, total_cents=total)
+        for p, qty in lines:
+            p.stock -= qty
+            sale.items.append(SaleItem(name=p.name, price_cents=p.price_cents, qty=qty))
+        db.session.add(sale)
+        db.session.commit()
+        flash(f"Sale #{sale.id} saved. Total: {money(total)}", "ok")
+        return redirect(url_for("pos"))
+    return render_template("pos.html", items=items)
+
+
+@app.route("/sales")
+@login_required
+def sales():
+    rows = (Sale.query.filter_by(store_id=current_user.store_id)
+            .order_by(Sale.created.desc()).limit(200).all())
+    return render_template("sales.html", rows=rows)
+
+
+# ---------------------------------------------------------------- users
+@app.route("/users", methods=["GET", "POST"])
+@owner_required
+def users():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip().lower()
+        pw = request.form.get("password", "")
+        role = request.form.get("role", "cashier")
+        if role not in ("owner", "cashier"):
+            role = "cashier"
+        if len(username) < 3 or len(pw) < 10:
+            flash("Username 3+ chars and password 10+ chars required.", "err")
+        elif User.query.filter_by(username=username).first():
+            flash("Username already taken.", "err")
+        else:
+            db.session.add(User(store_id=current_user.store_id, username=username,
+                                role=role, password_hash=generate_password_hash(pw)))
+            db.session.commit()
+            flash("User added.", "ok")
+    rows = User.query.filter_by(store_id=current_user.store_id).order_by(User.username).all()
+    return render_template("users.html", rows=rows)
+
+
+@app.route("/users/<int:uid>/toggle", methods=["POST"])
+@owner_required
+def user_toggle(uid):
+    u = User.query.filter_by(id=uid, store_id=current_user.store_id).first_or_404()
+    if u.id == current_user.id:
+        flash("You can't disable yourself.", "err")
+    else:
+        u.active = not u.active
+        db.session.commit()
+    return redirect(url_for("users"))
+
+
+@app.route("/users/<int:uid>/password", methods=["POST"])
+@owner_required
+def user_password(uid):
+    u = User.query.filter_by(id=uid, store_id=current_user.store_id).first_or_404()
+    pw = request.form.get("password", "")
+    if len(pw) < 10:
+        flash("Password must be at least 10 characters.", "err")
+    else:
+        u.password_hash = generate_password_hash(pw)
+        db.session.commit()
+        flash("Password changed.", "ok")
+    return redirect(url_for("users"))
+
+
+# ---------------------------------------------------------------- CLI
+@app.cli.command("backup")
+def backup():
+    """flask --app app backup  -> copies the SQLite file with a timestamp."""
+    src = os.path.join(INSTANCE, "grocery.db")
+    dst = os.path.join(INSTANCE, f"backup-{datetime.now():%Y%m%d-%H%M%S}.db")
+    shutil.copy2(src, dst)
+    print("Saved", dst)
+
+
+# ---------------------------------------------------------------- templates
+BASE = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ title or 'Grocery SaaS' }}</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;background:#f4f6f8;color:#222}
+nav{background:#14532d;color:#fff;padding:10px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+nav a,nav button{color:#fff;text-decoration:none;background:none;border:0;font:inherit;cursor:pointer}
+nav .sp{flex:1}
+main{max-width:980px;margin:20px auto;padding:0 16px}
+.card{background:#fff;border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px #0002}
+table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #eee;text-align:left}
+input,select{padding:8px;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box;margin:4px 0 10px}
+td input{margin:0;width:80px}
+.btn{background:#16a34a;color:#fff;border:0;padding:8px 14px;border-radius:6px;cursor:pointer;text-decoration:none;display:inline-block;font:inherit}
+.btn.red{background:#dc2626}.btn.gray{background:#6b7280}
+.msg{padding:10px;border-radius:6px;margin-bottom:10px}.ok{background:#dcfce7}.err{background:#fee2e2}
+.stats{display:flex;gap:16px;flex-wrap:wrap}.stats .card{flex:1;min-width:180px}
+.big{font-size:28px;font-weight:700}form.inline{display:inline}
+</style></head><body>
+<nav><b>🛒 {{ current_user.store.name if current_user.is_authenticated else 'Grocery SaaS' }}</b>
+{% if current_user.is_authenticated %}
+<a href="{{ url_for('dashboard') }}">Dashboard</a><a href="{{ url_for('pos') }}">New Sale</a>
+<a href="{{ url_for('products') }}">Products</a><a href="{{ url_for('sales') }}">Sales</a>
+{% if current_user.role == 'owner' %}<a href="{{ url_for('users') }}">Users</a>{% endif %}
+<span class="sp"></span><span>{{ current_user.username }}</span>
+<form class="inline" method="post" action="{{ url_for('logout') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button>Logout</button></form>
+{% endif %}</nav><main>
+{% for cat, m in get_flashed_messages(with_categories=true) %}<div class="msg {{ cat }}">{{ m }}</div>{% endfor %}
+{% block content %}{% endblock %}</main></body></html>"""
+
+LOGIN = """{% extends 'base' %}{% block content %}<div class="card" style="max-width:380px;margin:40px auto">
+<h2>Login</h2><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+Username<input name="username" required autofocus>Password<input type="password" name="password" required>
+<button class="btn">Login</button> <a href="{{ url_for('register') }}">Create a store</a></form></div>{% endblock %}"""
+
+REGISTER = """{% extends 'base' %}{% block content %}<div class="card" style="max-width:380px;margin:40px auto">
+<h2>Create your store</h2><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+Store name<input name="store_name" required>Owner username<input name="username" required>
+Password (10+ chars)<input type="password" name="password" required minlength="10">
+<button class="btn">Create</button> <a href="{{ url_for('login') }}">Login</a></form></div>{% endblock %}"""
+
+DASHBOARD = """{% extends 'base' %}{% block content %}
+<div class="stats"><div class="card"><div>Today's sales</div><div class="big">{{ total|money }}</div></div>
+<div class="card"><div>Transactions today</div><div class="big">{{ count }}</div></div></div>
+<div class="card"><h3>Low stock</h3>{% if low %}<table><tr><th>Product</th><th>Stock</th></tr>
+{% for p in low %}<tr><td>{{ p.name }}</td><td>{{ p.stock }} {{ p.unit }}</td></tr>{% endfor %}</table>
+{% else %}All good.{% endif %}</div>{% endblock %}"""
+
+PRODUCTS = """{% extends 'base' %}{% block content %}<div class="card">
+<form method="get" style="display:flex;gap:8px"><input name="q" value="{{ q }}" placeholder="Search name / barcode / category">
+<button class="btn" style="margin:4px 0 10px">Search</button>
+{% if current_user.role == 'owner' %}<a class="btn" style="margin:4px 0 10px" href="{{ url_for('product_new') }}">+ Add</a>{% endif %}</form>
+<table><tr><th>Name</th><th>Category</th><th>Barcode</th><th>Price</th><th>Stock</th><th></th></tr>
+{% for p in items %}<tr><td>{{ p.name }}</td><td>{{ p.category or '' }}</td><td>{{ p.barcode or '' }}</td>
+<td>{{ p.price_cents|money }}</td><td>{{ p.stock }} {{ p.unit }}</td><td>
+{% if current_user.role == 'owner' %}<a class="btn gray" href="{{ url_for('product_edit', pid=p.id) }}">Edit</a>
+<form class="inline" method="post" action="{{ url_for('product_delete', pid=p.id) }}" onsubmit="return confirm('Remove?')">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn red">Delete</button></form>{% endif %}
+</td></tr>{% endfor %}</table></div>{% endblock %}"""
+
+PRODUCT_FORM = """{% extends 'base' %}{% block content %}<div class="card" style="max-width:480px">
+<h2>{{ 'Edit' if p else 'New' }} product</h2><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+Name<input name="name" required value="{{ p.name if p else '' }}">
+Barcode<input name="barcode" value="{{ p.barcode or '' if p else '' }}">
+Category<input name="category" value="{{ p.category or '' if p else '' }}">
+Unit (pc, kg, ltr)<input name="unit" value="{{ p.unit if p else 'pc' }}">
+Price<input name="price" required value="{{ '%.2f' % (p.price_cents/100) if p else '' }}">
+Stock<input name="stock" type="number" min="0" required value="{{ p.stock if p else 0 }}">
+Low-stock alert at<input name="low_stock" type="number" min="0" value="{{ p.low_stock if p else 5 }}">
+<button class="btn">Save</button> <a class="btn gray" href="{{ url_for('products') }}">Cancel</a></form></div>{% endblock %}"""
+
+POS = """{% extends 'base' %}{% block content %}<div class="card"><h3>New sale</h3>
+<input id="f" placeholder="Filter products..." oninput="flt()">
+<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<table id="t"><tr><th>Product</th><th>Price</th><th>Stock</th><th>Qty</th></tr>
+{% for p in items %}<tr data-n="{{ (p.name ~ ' ' ~ (p.barcode or ''))|lower }}"><td>{{ p.name }}</td>
+<td>{{ p.price_cents|money }}</td><td>{{ p.stock }}</td>
+<td><input type="number" min="0" max="{{ p.stock }}" name="qty_{{ p.id }}"></td></tr>{% endfor %}</table>
+<br><button class="btn">Complete sale</button></form></div>
+<script>function flt(){var v=document.getElementById('f').value.toLowerCase();
+document.querySelectorAll('#t tr[data-n]').forEach(function(r){r.style.display=r.dataset.n.includes(v)?'':'none'})}</script>
+{% endblock %}"""
+
+SALES = """{% extends 'base' %}{% block content %}<div class="card"><h3>Recent sales</h3>
+<table><tr><th>#</th><th>Date (UTC)</th><th>Cashier</th><th>Items</th><th>Total</th></tr>
+{% for s in rows %}<tr><td>{{ s.id }}</td><td>{{ s.created.strftime('%Y-%m-%d %H:%M') }}</td>
+<td>{{ s.user.username if s.user else '' }}</td>
+<td>{% for i in s.items %}{{ i.qty }}× {{ i.name }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+<td>{{ s.total_cents|money }}</td></tr>{% endfor %}</table></div>{% endblock %}"""
+
+USERS = """{% extends 'base' %}{% block content %}<div class="card"><h3>Staff</h3>
+<table><tr><th>User</th><th>Role</th><th>Status</th><th>Actions</th></tr>
+{% for u in rows %}<tr><td>{{ u.username }}</td><td>{{ u.role }}</td><td>{{ 'active' if u.active else 'disabled' }}</td><td>
+<form class="inline" method="post" action="{{ url_for('user_toggle', uid=u.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<button class="btn gray">{{ 'Disable' if u.active else 'Enable' }}</button></form>
+<form class="inline" method="post" action="{{ url_for('user_password', uid=u.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="password" name="password" placeholder="new password" minlength="10" required><button class="btn">Set</button></form>
+</td></tr>{% endfor %}</table></div>
+<div class="card" style="max-width:420px"><h3>Add user</h3><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+Username<input name="username" required>Password (10+ chars)<input type="password" name="password" minlength="10" required>
+Role<select name="role"><option value="cashier">Cashier</option><option value="owner">Owner</option></select>
+<button class="btn">Add</button></form></div>{% endblock %}"""
+
+app.jinja_loader = DictLoader({
+    "base": BASE, "login.html": LOGIN, "register.html": REGISTER,
+    "dashboard.html": DASHBOARD, "products.html": PRODUCTS,
+    "product_form.html": PRODUCT_FORM, "pos.html": POS,
+    "sales.html": SALES, "users.html": USERS,
+})
+
+with app.app_context():
+    db.create_all()
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=5000, debug=False)

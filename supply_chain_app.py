@@ -24,13 +24,14 @@ if not db_url:
   )
   st.stop()
 
+# Fix URL for psycopg2 compatibility
+if db_url.startswith("postgresql://") and not "+psycopg2" in db_url:
+  db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+
 
 @st.cache_resource
 def get_engine(url):
-
-engine =if db_url.startswith("postgresql://") and not "+psycopg2" in db_url:
-  db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
- create_engine(db_url)
+  return create_engine(url)
 
 
 try:

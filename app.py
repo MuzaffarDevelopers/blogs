@@ -13,7 +13,7 @@ st.sidebar.write("Professional Python & Automation Solutions")
 menu = st.sidebar.radio("Navigation", ["Home", "Services", "Project Estimator"])
 
 if menu == "Home":
-    st.title("خوش آمدید مظفر ڈوویلپر کی جانب سے")
+    st.title("WELCOM TO MUZAFFAR DEVELOPER PAGE")
     st.write("We build custom Python desktop applications, automation scripts, and database-driven solutions.")
     st.info("This application is written in Python and deployed live via Streamlit!")
     

@@ -1,456 +1,413 @@
-import streamlit as st
-import pandas as pd
 import sqlite3
-from datetime import date
+from datetime import datetime
+import pandas as pd
+import streamlit as st
 
-# ==========================================
-# 1. PAGE CONFIGURATION & MATURE ANIMATED UI
-# ==========================================
-st.set_page_config(
-    page_title="Muzaffar Developers | Enterprise Grocery SaaS",
-    page_icon="🏪",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+DB_NAME = "supply_chain.db"
 
-# Mature SaaS CSS with subtle hover/fade transition animations
-MATURE_SAAS_CSS = """
-<style>
-    /* Professional Slate Background & Typography */
-    .stApp {
-        background-color: #f8fafc;
-        color: #0f172a;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    
-    h1, h2, h3 {
-        color: #1e293b !important;
-        font-weight: 700 !important;
-    }
-    
-    /* Smooth Animated Sidebar */
-    section[data-testid="stSidebar"] {
-        background-color: #ffffff !important;
-        border-right: 1px solid #e2e8f0;
-        transition: all 0.3s ease-in-out;
-    }
-    
-    /* Mature Card Containers with Subtle Hover Lift Animation */
-    div[data-testid="stMetric"], div[data-testid="stForm"] {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-        transition: transform 0.25s ease, box-shadow 0.25s ease;
-    }
-    div[data-testid="stMetric"]:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08);
-    }
-    
-    div[data-testid="stMetricValue"] {
-        color: #2563eb !important;
-        font-weight: 700 !important;
-    }
-    
-    /* Professional Action Buttons with Fade Animation */
-    .stButton > button, div[data-testid="stForm"] button {
-        background-color: #2563eb !important;
-        color: #ffffff !important;
-        font-weight: 600 !important;
-        border: none !important;
-        border-radius: 8px !important;
-        padding: 0.5rem 1rem !important;
-        transition: background-color 0.2s ease, transform 0.1s ease !important;
-    }
-    .stButton > button:hover {
-        background-color: #1d4ed8 !important;
-        transform: scale(1.01);
-    }
-    
-    /* Clean Dataframes */
-    div[data-testid="stDataFrame"] {
-        background: #ffffff;
-        border-radius: 10px;
-        border: 1px solid #e2e8f0;
-        padding: 4px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
-    }
-</style>
-"""
-st.markdown(MATURE_SAAS_CSS, unsafe_allow_html=True)
 
-# ==========================================
-# 2. SECURE DATABASE ENGINE & SEEDING
-# ==========================================
-DB_FILE = "grocery_mature_saas.db"
+def get_connection():
+  return sqlite3.connect(DB_NAME, check_same_thread=False)
 
-def get_db_connection():
-    return sqlite3.connect(DB_FILE, check_same_thread=False)
 
 def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Users Table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL,
-            full_name TEXT NOT NULL
+  conn = get_connection()
+  cursor = conn.cursor()
+
+  # Create tables if they don't exist
+  cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bulks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            blk_no TEXT UNIQUE NOT NULL,
+            qty INTEGER NOT NULL,
+            status TEXT DEFAULT 'SENT',
+            decline_reason TEXT,
+            created_at TEXT
         )
-    ''')
-    
-    # Inventory Table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS inventory (
-            item_code TEXT PRIMARY KEY,
-            item_name TEXT NOT NULL,
-            category TEXT NOT NULL,
-            stock_qty INTEGER NOT NULL,
-            unit_price REAL NOT NULL,
-            expiry_date TEXT
+    """)
+
+  cursor.execute("""
+        CREATE TABLE IF NOT EXISTS purchase_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            po_no TEXT UNIQUE NOT NULL,
+            buyer TEXT NOT NULL,
+            qty INTEGER NOT NULL,
+            sale_status TEXT DEFAULT 'NEW',
+            loading_status TEXT DEFAULT 'PENDING',
+            allocated_details TEXT,
+            created_at TEXT
         )
-    ''')
-    
-    # Sales Table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sales (
-            invoice_no TEXT PRIMARY KEY,
-            sale_date TEXT NOT NULL,
-            cashier TEXT NOT NULL,
-            customer_name TEXT NOT NULL,
-            total_amount REAL NOT NULL,
-            payment_mode TEXT NOT NULL
-        )
-    ''')
-    
-    # Customers Table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS customers (
-            customer_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            credit_balance REAL NOT NULL
-        )
-    ''')
-    
-    # Seed Admin User if empty
-    cursor.execute('SELECT COUNT(*) FROM users')
-    if cursor.fetchone()[0] == 0:
-        cursor.executemany('INSERT INTO users VALUES (?, ?, ?, ?)', [
-            ("admin", "muzaffar123", "Admin", "Muzaffar (Administrator)"),
-            ("cashier", "cashier123", "Cashier", "Store Cashier")
-        ])
-        
-    # Seed Inventory if empty
-    cursor.execute('SELECT COUNT(*) FROM inventory')
-    if cursor.fetchone()[0] == 0:
-        cursor.executemany('INSERT INTO inventory VALUES (?, ?, ?, ?, ?, ?)', [
-            ("G-101", "Basmati Rice (5kg)", "Grains", 50, 14.00, "2027-12-31"),
-            ("G-102", "Cooking Canola Oil (1L)", "Pantry", 75, 4.50, "2026-11-15"),
-            ("G-103", "Whole Wheat Flour (10kg)", "Grains", 40, 10.50, "2027-06-30"),
-            ("G-104", "Refined White Sugar (1kg)", "Pantry", 100, 1.60, "2028-01-01"),
-            ("G-105", "Pasteurized Milk (1L)", "Dairy", 20, 1.30, "2026-10-15")
-        ])
-        
-    # Seed Customers if empty
-    cursor.execute('SELECT COUNT(*) FROM customers')
-    if cursor.fetchone()[0] == 0:
-        cursor.executemany('INSERT INTO customers VALUES (?, ?, ?, ?)', [
-            ("C-001", "General Walk-in Customer", "N/A", 0.0),
-            ("C-002", "Tariq Mahmood", "+92 300 9876543", 15.00)
-        ])
-        
-    conn.commit()
-    conn.close()
+    """)
+
+  # Auto-migration / Schema check for old databases
+  cursor.execute("PRAGMA table_info(bulks)")
+  bulk_cols = [col[1] for col in cursor.fetchall()]
+  if "status" not in bulk_cols:
+    cursor.execute("ALTER TABLE bulks ADD COLUMN status TEXT DEFAULT 'ACCEPTED'")
+  if "decline_reason" not in bulk_cols:
+    cursor.execute("ALTER TABLE bulks ADD COLUMN decline_reason TEXT")
+
+  cursor.execute("PRAGMA table_info(purchase_orders)")
+  po_cols = [col[1] for col in cursor.fetchall()]
+  if "sale_status" not in po_cols:
+    cursor.execute("ALTER TABLE purchase_orders ADD COLUMN sale_status TEXT DEFAULT 'NEW'")
+  if "loading_status" not in po_cols:
+    cursor.execute("ALTER TABLE purchase_orders ADD COLUMN loading_status TEXT DEFAULT 'PENDING'")
+  if "allocated_details" not in po_cols:
+    cursor.execute("ALTER TABLE purchase_orders ADD COLUMN allocated_details TEXT")
+
+  # Seed Demo Data if tables are empty
+  cursor.execute("SELECT COUNT(*) FROM bulks")
+  if cursor.fetchone()[0] == 0:
+    # Demo bulks: BLK#001 has 20 bags (exact fit for POs 1240 and 1241)
+    # BLK#002 starts next
+    demo_bulks = [
+        ("BLK#001", 20, "ACCEPTED", None),
+        ("BLK#002", 30, "ACCEPTED", None),
+        ("BLK#003", 25, "SENT", None),
+    ]
+    cursor.executemany(
+        "INSERT OR IGNORE INTO bulks (blk_no, qty, status, decline_reason, created_at) VALUES (?, ?, ?, ?, ?)",
+        [(b[0], b[1], b[2], b[3], datetime.now().strftime("%Y-%m-%d %H:%M")) for b in demo_bulks],
+    )
+
+  cursor.execute("SELECT COUNT(*) FROM purchase_orders")
+  if cursor.fetchone()[0] == 0:
+    demo_pos = [
+        ("1240", "Acme Corp", 10, "ACCEPTED", "PENDING", None),
+        ("1241", "Global Traders", 10, "ACCEPTED", "PENDING", None),
+        ("1242", "Beta Industries", 15, "NEW", "PENDING", None),
+    ]
+    cursor.executemany(
+        """INSERT OR IGNORE INTO purchase_orders 
+           (po_no, buyer, qty, sale_status, loading_status, allocated_details, created_at) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        [(p[0], p[1], p[2], p[3], p[4], p[5], datetime.now().strftime("%Y-%m-%d %H:%M")) for p in demo_pos],
+    )
+
+  conn.commit()
+  conn.close()
+
 
 init_db()
 
-# ==========================================
-# 3. AUTHENTICATION GATEWAY
-# ==========================================
-if "user" not in st.session_state:
-    st.session_state.user = None
-if "role" not in st.session_state:
-    st.session_state.role = None
+st.set_page_config(page_title="Supply Chain Management Portal", layout="wide")
+st.title("📦 Integrated Supply Chain Portal")
 
-if not st.session_state.user:
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        st.markdown("<h2 style='text-align: center;'>🏪 Enterprise SaaS Portal</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #64748b;'>Enter credentials to access secure terminal.</p>", unsafe_allow_html=True)
-        
-        with st.form("login_form"):
-            u_input = st.text_input("Username")
-            p_input = st.text_input("Password", type="password")
-            login_btn = st.form_submit_button("Sign In")
-            
-            if login_btn:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute('SELECT role, full_name FROM users WHERE username = ? AND password = ?', (u_input, p_input))
-                record = cursor.fetchone()
-                conn.close()
-                
-                if record:
-                    st.session_state.user = record[1]
-                    st.session_state.role = record[0]
-                    st.success(f"Authenticated as {record[1]}")
-                    st.rerun()
-                else:
-                    st.error("Invalid login credentials. (Default: admin / muzaffar123)")
-        st.stop()
+# Tabs Navigation
+tab_prod, tab_wh, tab_sale, tab_load, tab_buyer = st.tabs(
+    ["🏭 Production", "🏢 Warehouse", "💼 Sale Office", "🚚 Truck Loading", "🛒 Buyer Portal"]
+)
 
-# ==========================================
-# 4. SIDEBAR NAVIGATION
-# ==========================================
-st.sidebar.markdown(f"<h3 style='color: #1e293b; font-size: 1.1rem;'>👤 {st.session_state.user}</h3>", unsafe_allow_html=True)
-st.sidebar.markdown(f"<p style='color: #2563eb; font-weight: 600; font-size: 0.85rem;'>Access Level: {st.session_state.role}</p>", unsafe_allow_html=True)
-st.sidebar.markdown("---")
+# ---------------------------------------------------------
+# 1. PRODUCTION TAB
+# ---------------------------------------------------------
+with tab_prod:
+  st.header("Production - Bulk Dispatch")
 
-nav_items = ["📊 Overview Dashboard", "🛒 POS Checkout", "📦 Inventory Stock", "👥 Customers", "📥 Sales Reports"]
-if st.session_state.role == "Admin":
-    nav_items.append("⚙️ Secure Database Editor")
-
-choice = st.sidebar.radio("NAVIGATION", nav_items)
-
-if st.sidebar.button("🔒 Secure Logout"):
-    st.session_state.user = None
-    st.session_state.role = None
-    st.rerun()
-
-# ==========================================
-# 5. MODULE 1: DASHBOARD
-# ==========================================
-if choice == "📊 Overview Dashboard":
-    st.title("📊 Store Performance Dashboard")
-    st.markdown("---")
-
-    conn = get_db_connection()
-    df_inv = pd.read_sql('SELECT * FROM inventory', conn)
-    df_sales = pd.read_sql('SELECT * FROM sales', conn)
-    df_cust = pd.read_sql('SELECT * FROM customers', conn)
-    conn.close()
-
-    total_skus = len(df_inv)
-    low_stock = len(df_inv[df_inv["stock_qty"] <= 10])
-    revenue = df_sales["total_amount"].sum() if not df_sales.empty else 0.0
-    customers_count = len(df_cust)
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total SKUs", total_skus)
-    c2.metric("Low Stock Alerts", low_stock)
-    c3.metric("Gross Revenue", f"${revenue:,.2f}")
-    c4.metric("Client Accounts", customers_count)
-
-    st.markdown("<br>", unsafe_allow_html=True)
+  with st.form("new_bulk_form"):
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("📦 Inventory Snapshot")
-        if not df_inv.empty:
-            st.dataframe(df_inv[["item_code", "item_name", "stock_qty", "unit_price"]], use_container_width=True)
+      new_blk_no = st.text_input("Bulk Number (e.g., BLK#004)")
     with col2:
-        st.subheader("💰 Recent Sales Log")
-        if not df_sales.empty:
-            st.dataframe(df_sales.head(5), use_container_width=True)
+      new_blk_qty = st.number_input("Quantity (Bags)", min_value=1, value=20, step=1)
+    submit_bulk = st.form_submit_button("Send Bulk to Warehouse")
 
-# ==========================================
-# 6. MODULE 2: POS CHECKOUT TERMINAL
-# ==========================================
-elif choice == "🛒 POS Checkout":
-    st.title("🛒 Point of Sale Terminal")
-    st.markdown("---")
-
-    conn = get_db_connection()
-    df_inv = pd.read_sql('SELECT * FROM inventory', conn)
-    df_cust = pd.read_sql('SELECT * FROM customers', conn)
-    conn.close()
-
-    col_pos1, col_pos2 = st.columns([1.5, 1])
-
-    with col_pos1:
-        st.subheader("Catalog Selection")
-        selected_prod = st.selectbox("Select Product", df_inv['item_name'].tolist())
-        p_row = df_inv[df_inv['item_name'] == selected_prod].iloc[0]
-
-        st.write(f"**Code:** {p_row['item_code']} | **Price:** ${p_row['unit_price']} | **In Stock:** {p_row['stock_qty']}")
-        qty = st.number_input("Quantity", min_value=1, max_value=int(p_row['stock_qty']) if p_row['stock_qty'] > 0 else 1, value=1)
-
-        if "pos_cart" not in st.session_state:
-            st.session_state.pos_cart = []
-
-        if st.button("Add Item to Cart"):
-            st.session_state.pos_cart.append({
-                "item_code": p_row['item_code'],
-                "item_name": selected_prod,
-                "price": p_row['unit_price'],
-                "qty": qty,
-                "subtotal": p_row['unit_price'] * qty
-            })
-            st.success(f"Added {qty}x {selected_prod}")
-
-    with col_pos2:
-        st.subheader("Current Order Cart")
-        if st.session_state.pos_cart:
-            cart_df = pd.DataFrame(st.session_state.pos_cart)
-            st.dataframe(cart_df[["item_name", "qty", "subtotal"]], use_container_width=True)
-            
-            grand_total = cart_df["subtotal"].sum()
-            st.markdown(f"### **Total: ${grand_total:,.2f}**")
-
-            client = st.selectbox("Customer", df_cust['name'].tolist())
-            mode = st.selectbox("Payment Mode", ["Cash", "Credit Card", "Store Credit"])
-
-            if st.button("Finalize Checkout"):
-                invoice_id = f"INV-{date.today().strftime('%Y%m%d')}-{len(pd.read_sql('SELECT * FROM sales', get_db_connection()))+1}"
-                try:
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('INSERT INTO sales VALUES (?, ?, ?, ?, ?, ?)', 
-                                   (invoice_id, str(date.today()), st.session_state.user, client, grand_total, mode))
-                    
-                    for item in st.session_state.pos_cart:
-                        cursor.execute('UPDATE inventory SET stock_qty = stock_qty - ? WHERE item_code = ?', 
-                                       (item['qty'], item['item_code']))
-                    conn.commit()
-                    conn.close()
-                    
-                    st.success(f"Transaction successful! Invoice: {invoice_id}")
-                    st.session_state.pos_cart = []
-                except Exception as e:
-                    st.error(f"Error processing transaction: {e}")
-
-            if st.button("Clear Cart"):
-                st.session_state.pos_cart = []
-                st.rerun()
-        else:
-            st.write("Cart is empty.")
-
-# ==========================================
-# 7. MODULE 3: INVENTORY MANAGER
-# ==========================================
-elif choice == "📦 Inventory Stock":
-    st.title("📦 Inventory Management")
-    st.markdown("---")
-
-    conn = get_db_connection()
-    df_inv = pd.read_sql('SELECT * FROM inventory', conn)
-    conn.close()
-
-    st.subheader("Active Inventory Stock")
-    st.dataframe(df_inv, use_container_width=True)
-
-    st.subheader("Add New Stock SKU")
-    with st.form("add_inv", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        code = c1.text_input("Item Code", f"G-10{len(df_inv)+1}")
-        name = c2.text_input("Item Name")
-        cat = c1.selectbox("Category", ["Grains", "Pantry", "Dairy", "Beverages", "Household"])
-        stock = c2.number_input("Initial Quantity", min_value=1, value=50)
-        price = c1.number_input("Unit Price ($)", min_value=0.1, value=5.00)
-        exp = c2.date_input("Expiry Date")
-
-        if st.form_submit_button("Save Item"):
-            if name:
-                try:
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('INSERT INTO inventory VALUES (?, ?, ?, ?, ?, ?)', 
-                                   (code, name, cat, stock, price, str(exp)))
-                    conn.commit()
-                    conn.close()
-                    st.success("Item saved successfully.")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("Item code already exists.")
-            else:
-                st.error("Provide an item name.")
-
-# ==========================================
-# 8. MODULE 4: CUSTOMERS
-# ==========================================
-elif choice == "👥 Customers":
-    st.title("👥 Customer Accounts")
-    st.markdown("---")
-
-    conn = get_db_connection()
-    df_cust = pd.read_sql('SELECT * FROM customers', conn)
-    conn.close()
-
-    st.dataframe(df_cust, use_container_width=True)
-
-    st.subheader("Register Customer")
-    with st.form("add_cust", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        cid = c1.text_input("Customer ID", f"C-00{len(df_cust)+1}")
-        cname = c2.text_input("Full Name")
-        phone = c1.text_input("Phone Number")
-        credit = c2.number_input("Credit Balance ($)", value=0.0)
-
-        if st.form_submit_button("Save Customer"):
-            if cname:
-                try:
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('INSERT INTO customers VALUES (?, ?, ?, ?)', (cid, cname, phone, credit))
-                    conn.commit()
-                    conn.close()
-                    st.success("Customer added.")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("Customer ID exists.")
-            else:
-                st.error("Enter customer name.")
-
-# ==========================================
-# 9. MODULE 5: REPORTS & EXPORTS
-# ==========================================
-elif choice == "📥 Sales Reports":
-    st.title("📥 Reports & Data Export")
-    st.markdown("---")
-
-    conn = get_db_connection()
-    df_sales = pd.read_sql('SELECT * FROM sales', conn)
-    df_inv = pd.read_sql('SELECT * FROM inventory', conn)
-    conn.close()
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.download_button("Download Sales CSV", df_sales.to_csv(index=False).encode('utf-8'), "sales_report.csv", "text/csv")
-    with c2:
-        st.download_button("Download Inventory CSV", df_inv.to_csv(index=False).encode('utf-8'), "inventory_report.csv", "text/csv")
-
-# ==========================================
-# 10. MODULE 6: ADMIN SECURE DATABASE EDITOR
-# ==========================================
-elif choice == "⚙️ Secure Database Editor" and st.session_state.role == "Admin":
-    st.title("⚙️ Database Table Editor")
-    st.caption("Direct secure administrative CRUD operations for SQLite tables.")
-    st.markdown("---")
-
-    tbl = st.selectbox("Select Table", ["inventory", "customers", "users", "sales"])
-
-    conn = get_db_connection()
-    df_tbl = pd.read_sql(f"SELECT * FROM {tbl}", conn)
-    conn.close()
-
-    st.info("Edit table cells directly below, then click **Commit Changes** to write updates to the database.")
-    edited_df = st.data_editor(df_tbl, use_container_width=True, num_rows="dynamic")
-
-    if st.button("Commit Changes"):
+    if submit_bulk:
+      if new_blk_no.strip() == "":
+        st.error("Bulk Number cannot be empty.")
+      else:
+        conn = get_connection()
+        cursor = conn.cursor()
         try:
-            conn = get_db_connection()
-            edited_df.to_sql(tbl, conn, if_exists='replace', index=False)
-            conn.close()
-            st.success(f"Table `{tbl}` updated successfully.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error updating table: {e}")
+          cursor.execute(
+              "INSERT INTO bulks (blk_no, qty, status, created_at) VALUES (?, ?, 'SENT', ?)",
+              (new_blk_no.strip(), new_blk_qty, datetime.now().strftime("%Y-%m-%d %H:%M")),
+          )
+          conn.commit()
+          st.success(f"Bulk {new_blk_no} sent to Warehouse successfully!")
+          st.rerun()
+        except sqlite3.IntegrityError:
+          st.error(f"Bulk Number {new_blk_no} already exists.")
+        finally:
+          conn.close()
 
-# Footer
-st.markdown("---")
-st.markdown("<p style='text-align: center; color: #64748b; font-size: 0.85rem;'>© 2026 Muzaffar Developers | Enterprise Grocery SaaS</p>", unsafe_allow_html=True)
+  st.subheader("Dispatched Bulks Status")
+  conn = get_connection()
+  bulks_df = pd.read_sql("SELECT blk_no, qty, status, decline_reason, created_at FROM bulks", conn)
+  conn.close()
+
+  if not bulks_df.empty:
+    for idx, row in bulks_df.iterrows():
+      with st.container():
+        c1, c2, c3, c4 = st.columns([2, 2, 2, 4])
+        c1.write(f"**{row['blk_no']}**")
+        c2.write(f"Qty: {row['qty']}")
+        
+        status = row['status']
+        if status == 'ACCEPTED':
+          c3.success("ACCEPTED")
+        elif status == 'DECLINED':
+          c3.error("DECLINED")
+        else:
+          c3.warning("SENT")
+
+        if status == 'DECLINED':
+          c4.write(f"Reason: *{row['decline_reason'] or 'No reason provided'}*")
+          if st.button(f"Re-send {row['blk_no']}", key=f"resend_{row['blk_no']}''_{idx}"):
+            conn = get_connection()
+            conn.execute("UPDATE bulks SET status = 'SENT', decline_reason = NULL WHERE blk_no = ?", (row['blk_no'],))
+            conn.commit()
+            conn.close()
+            st.success(f"Bulk {row['blk_no']} re-sent to Warehouse!")
+            st.rerun()
+        elif status == 'SENT':
+          c4.write("Pending Warehouse Review")
+        else:
+          c4.write("Stock added to inventory pool.")
+  else:
+    st.info("No bulks dispatched yet.")
+
+# ---------------------------------------------------------
+# 2. WAREHOUSE TAB
+# ---------------------------------------------------------
+with tab_wh:
+  st.header("Warehouse - Incoming Bulks & Inventory")
+
+  st.subheader("Incoming Bulks Inspection")
+  conn = get_connection()
+  sent_bulks = pd.read_sql("SELECT id, blk_no, qty, status, decline_reason FROM bulks WHERE status = 'SENT'", conn)
+  conn.close()
+
+  if not sent_bulks.empty:
+    for _, row in sent_bulks.iterrows():
+      with st.expander(f"Inspect: {row['blk_no']} (Qty: {row['qty']})"):
+        col1, col2 = st.columns(2)
+        with col1:
+          if st.button("Accept Bulk", key=f"acc_{row['id']}"):
+            conn = get_connection()
+            conn.execute("UPDATE bulks SET status = 'ACCEPTED' WHERE id = ?", (row['id'],))
+            conn.commit()
+            conn.close()
+            st.success(f"Bulk {row['blk_no']} accepted into stock!")
+            st.rerun()
+        with col2:
+          decline_reason = st.text_input("Decline Reason (Optional)", key=f"dec_reason_{row['id']}")
+          if st.button("Decline Bulk", key=f"dec_{row['id']}"):
+            conn = get_connection()
+            conn.execute(
+                "UPDATE bulks SET status = 'DECLINED', decline_reason = ? WHERE id = ?",
+                (decline_reason, row['id']),
+            )
+            conn.commit()
+            conn.close()
+            st.warning(f"Bulk {row['blk_no']} declined.")
+            st.rerun()
+  else:
+    st.info("No incoming bulks waiting for inspection.")
+
+  st.divider()
+  st.subheader("Current Accepted Stock (FIFO Pool)")
+  conn = get_connection()
+  accepted_df = pd.read_sql("SELECT blk_no, qty FROM bulks WHERE status = 'ACCEPTED' ORDER BY blk_no ASC", conn)
+  conn.close()
+  if not accepted_df.empty:
+    st.dataframe(accepted_df, use_container_width=True)
+    total_avail = accepted_df['qty'].sum()
+    st.metric("Total Available Accepted Stock", f"{total_avail} Bags")
+  else:
+    st.warning("No accepted stock available in the warehouse.")
+
+# ---------------------------------------------------------
+# 3. SALE OFFICE TAB
+# ---------------------------------------------------------
+with tab_sale:
+  st.header("Sale Office - Purchase Order Review")
+
+  with st.form("new_po_form"):
+    c1, c2, c3 = st.columns(3)
+    with c1:
+      po_no = st.text_input("PO Number (e.g., 1243)")
+    with c2:
+      buyer_name = st.text_input("Buyer Name")
+    with c3:
+      po_qty = st.number_input("Order Quantity (Bags)", min_value=1, value=10, step=1)
+    submit_po = st.form_submit_button("Create Purchase Order")
+
+    if submit_po:
+      if po_no.strip() == "" or buyer_name.strip() == "":
+        st.error("Please fill in all PO details.")
+      else:
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+          cursor.execute(
+              """INSERT INTO purchase_orders (po_no, buyer, qty, sale_status, loading_status, created_at) 
+                 VALUES (?, ?, ?, 'NEW', 'PENDING', ?)""",
+              (po_no.strip(), buyer_name.strip(), po_qty, datetime.now().strftime("%Y-%m-%d %H:%M")),
+          )
+          conn.commit()
+          st.success(f"PO {po_no} created successfully!")
+          st.rerun()
+        except sqlite3.IntegrityError:
+          st.error(f"PO Number {po_no} already exists.")
+        finally:
+          conn.close()
+
+  st.subheader("Manage Purchase Orders")
+  conn = get_connection()
+  po_df = pd.read_sql("SELECT id, po_no, buyer, qty, sale_status, loading_status FROM purchase_orders", conn)
+  conn.close()
+
+  if not po_df.empty:
+    for _, row in po_df.iterrows():
+      cols = st.columns([2, 2, 2, 2, 2])
+      cols[0].write(f"**PO#{row['po_no']}**")
+      cols[1].write(f"Buyer: {row['buyer']}")
+      cols[2].write(f"Qty: {row['qty']}")
+      cols[3].write(f"Status: **{row['sale_status']}**")
+      
+      with cols[4]:
+        if row['sale_status'] != 'ACCEPTED':
+          if st.button("Accept", key=f"po_acc_{row['id']}"):
+            conn = get_connection()
+            conn.execute("UPDATE purchase_orders SET sale_status = 'ACCEPTED' WHERE id = ?", (row['id'],))
+            conn.commit()
+            conn.close()
+            st.success(f"PO {row['po_no']} accepted and sent to Warehouse!")
+            st.rerun()
+        if row['sale_status'] != 'PENDING':
+          if st.button("Pending", key=f"po_pend_{row['id']}"):
+            conn = get_connection()
+            conn.execute("UPDATE purchase_orders SET sale_status = 'PENDING' WHERE id = ?", (row['id'],))
+            conn.commit()
+            conn.close()
+            st.info(f"PO {row['po_no']} put on Pending hold.")
+            st.rerun()
+  else:
+    st.info("No purchase orders found.")
+
+# ---------------------------------------------------------
+# 4. TRUCK LOADING TAB
+# ---------------------------------------------------------
+with tab_load:
+  st.header("Truck Loading & OGP Generation")
+  st.markdown("Orders accepted by the Sale Office can be loaded. Allocation strictly follows the lowest **BLK#** first.")
+
+  conn = get_connection()
+  ready_pos = pd.read_sql("SELECT id, po_no, buyer, qty, loading_status FROM purchase_orders WHERE sale_status = 'ACCEPTED' AND loading_status != 'CLEAR'", conn)
+  conn.close()
+
+  if not ready_pos.empty:
+    selected_po_no = st.selectbox("Select PO to Load onto Truck", ready_pos['po_no'].tolist())
+    po_row = ready_pos[ready_pos['po_no'] == selected_po_no].iloc[0]
+    
+    st.write(f"**Buyer:** {po_row['buyer']} | **Required Qty:** {po_row['qty']} Bags")
+
+    if st.button("Attempt Truck Loading"):
+      # Fetch accepted bulks sorted by blk_no ascending (lowest BLK# first)
+      conn = get_connection()
+      bulks_stock = pd.read_sql("SELECT id, blk_no, qty FROM bulks WHERE status = 'ACCEPTED' ORDER BY blk_no ASC", conn)
+      
+      needed_qty = po_row['qty']
+      total_available = bulks_stock['qty'].sum()
+
+      if total_available < needed_qty:
+        st.error(f"❌ Truck cannot be loaded! Accepted stock is not enough. Needed: {needed_qty} bags, Available: {total_available} bags.")
+      else:
+        # Perform FIFO allocation across lowest BLK# first
+        allocation = []
+        remaining_needed = needed_qty
+        bulks_to_update = []
+
+        for _, b in bulks_stock.iterrows():
+          if remaining_needed <= 0:
+            break
+          b_id = b['id']
+          b_no = b['blk_no']
+          b_qty = b['qty']
+
+          if b_qty <= remaining_needed:
+            # Consume entire bulk
+            allocation.append(f"{b_qty} from {b_no}")
+            remaining_needed -= b_qty
+            bulks_to_update.append((0, b_id)) # reduce bulk qty to 0 or delete
+          else:
+            # Consume partial bulk
+            allocation.append(f"{remaining_needed} from {b_no}")
+            new_b_qty = b_qty - remaining_needed
+            remaining_needed = 0
+            bulks_to_update.append((new_b_qty, b_id))
+
+        split_str = " + ".join(allocation)
+        
+        # Update database: deduct stock and mark PO as CLEAR / LOADING
+        cursor = conn.cursor()
+        for new_qty, b_id in bulks_to_update:
+          if new_qty == 0:
+            cursor.execute("DELETE FROM bulks WHERE id = ?", (b_id,))
+          else:
+            cursor.execute("UPDATE bulks SET qty = ? WHERE id = ?", (new_qty, b_id))
+        
+        cursor.execute(
+            "UPDATE purchase_orders SET loading_status = 'CLEAR', allocated_details = ? WHERE id = ?",
+            (split_str, po_row['id']),
+        )
+        conn.commit()
+        conn.close()
+
+        st.success("🚚 Truck Loaded Successfully!")
+        st.balloons()
+        st.info(f"**Outward Gate Pass (OGP) Split Message:** PO#{po_row['po_no']} loaded with: {split_str}")
+        st.rerun()
+  else:
+    st.info("No approved POs awaiting truck loading.")
+
+  st.divider()
+  st.subheader("Loading History & OGP Log")
+  conn = get_connection()
+  loaded_df = pd.read_sql("SELECT po_no, buyer, qty, allocated_details FROM purchase_orders WHERE loading_status = 'CLEAR'", conn)
+  conn.close()
+  if not loaded_df.empty:
+    st.dataframe(loaded_df, use_container_width=True)
+  else:
+    st.info("No truck dispatches completed yet.")
+
+# ---------------------------------------------------------
+# 5. BUYER PORTAL TAB
+# ---------------------------------------------------------
+with tab_buyer:
+  st.header("Buyer Order Tracking")
+  st.markdown("Check live updates on your orders and Sale Office decisions.")
+
+  conn = get_connection()
+  buyer_df = pd.read_sql("SELECT po_no, buyer, qty, sale_status, loading_status, allocated_details FROM purchase_orders", conn)
+  conn.close()
+
+  if not buyer_df.empty:
+    display_data = []
+    for _, row in buyer_df.iterrows():
+      # Map statuses to user-friendly requirements (NEW, PENDING, LOADING, CLEAR)
+      sale = row['sale_status']
+      loading = row['loading_status']
+
+      if loading == 'CLEAR':
+        status_display = "CLEAR (Loaded)"
+      elif sale == 'PENDING':
+        status_display = "PENDING"
+      elif sale == 'ACCEPTED':
+        status_display = "LOADING"
+      else:
+        status_display = "NEW"
+
+      display_data.append({
+          "PO#": row['po_no'],
+          "Buyer": row['buyer'],
+          "Qty": row['qty'],
+          "Decision / Status": status_display,
+          "Allocation Details": row['allocated_details'] or "Pending Dispatch"
+      })
+
+    st.dataframe(pd.DataFrame(display_data), use_container_width=True)
+  else:
+    st.info("No purchase orders registered in the system.")

@@ -1,96 +1,120 @@
-import sqlite3
 from datetime import datetime
 import pandas as pd
 import streamlit as st
+from sqlalchemy import create_engine, text
 
-DB_NAME = "supply_chain.db"
+# Page Configuration
+st.set_page_config(page_title="Supply Chain Portal (Supabase Cloud)", layout="wide")
+
+# ---------------------------------------------------------
+# DATABASE CONNECTION SETUP (SUPABASE / POSTGRESQL)
+# ---------------------------------------------------------
+st.sidebar.title("☁️ Supabase Cloud DB")
+db_url = st.sidebar.text_input(
+    "PostgreSQL Connection URL",
+    type="password",
+    help="Paste your Supabase database URI here (postgresql://user:pass@host:port/dbname)",
+)
+
+if not db_url:
+  st.title("📦 Integrated Supply Chain Portal")
+  st.warning("⚠️ Please enter your Supabase PostgreSQL Connection URL in the sidebar to connect the database.")
+  st.info(
+      "**How to get it:** Go to your Supabase Project Settings -> Database -> Connection string -> URI."
+  )
+  st.stop()
 
 
-def get_connection():
-  return sqlite3.connect(DB_NAME, check_same_thread=False)
+@st.cache_resource
+def get_engine(url):
+  return create_engine(url)
+
+
+try:
+  engine = get_engine(db_url)
+  # Test connection
+  with engine.connect() as conn:
+    conn.execute(text("SELECT 1"))
+except Exception as e:
+  st.error(f"❌ Database Connection Failed: {e}")
+  st.stop()
 
 
 def init_db():
-  conn = get_connection()
-  cursor = conn.cursor()
+  with engine.begin() as conn:
+    # 1. Bulks Table (PostgreSQL syntax)
+    conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS bulks (
+                id SERIAL PRIMARY KEY,
+                blk_no TEXT UNIQUE NOT NULL,
+                qty INTEGER NOT NULL,
+                status TEXT DEFAULT 'SENT',
+                decline_reason TEXT,
+                created_at TEXT
+            )
+        """))
 
-  # 1. Bulks Table
-  cursor.execute("""
-        CREATE TABLE IF NOT EXISTS bulks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            blk_no TEXT UNIQUE NOT NULL,
-            qty INTEGER NOT NULL,
-            status TEXT DEFAULT 'SENT',
-            decline_reason TEXT,
-            created_at TEXT
+    # 2. Purchase Orders Table
+    conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS purchase_orders (
+                id SERIAL PRIMARY KEY,
+                po_no TEXT UNIQUE NOT NULL,
+                buyer TEXT NOT NULL,
+                qty INTEGER NOT NULL,
+                sale_status TEXT DEFAULT 'NEW',
+                loading_status TEXT DEFAULT 'PENDING',
+                allocated_details TEXT,
+                created_at TEXT
+            )
+        """))
+
+    # Seed Demo Data if bulks table is empty
+    result = conn.execute(text("SELECT COUNT(*) FROM bulks")).fetchone()[0]
+    if result == 0:
+      demo_bulks = [
+          ("BLK#001", 20, "ACCEPTED", None),
+          ("BLK#002", 30, "ACCEPTED", None),
+          ("BLK#003", 25, "SENT", None),
+      ]
+      for b in demo_bulks:
+        conn.execute(
+            text(
+                "INSERT INTO bulks (blk_no, qty, status, decline_reason, created_at) VALUES (:blk, :qty, :status, :reason, :time) ON CONFLICT (blk_no) DO NOTHING"
+            ),
+            {
+                "blk": b[0],
+                "qty": b[1],
+                "status": b[2],
+                "reason": b[3],
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            },
         )
-    """)
 
-  # 2. Purchase Orders Table
-  cursor.execute("""
-        CREATE TABLE IF NOT EXISTS purchase_orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            po_no TEXT UNIQUE NOT NULL,
-            buyer TEXT NOT NULL,
-            qty INTEGER NOT NULL,
-            sale_status TEXT DEFAULT 'NEW',
-            loading_status TEXT DEFAULT 'PENDING',
-            allocated_details TEXT,
-            created_at TEXT
+    result_po = conn.execute(text("SELECT COUNT(*) FROM purchase_orders")).fetchone()[0]
+    if result_po == 0:
+      demo_pos = [
+          ("1240", "Acme Corp", 10, "ACCEPTED", "PENDING", None),
+          ("1241", "Global Traders", 10, "ACCEPTED", "PENDING", None),
+          ("1242", "Beta Industries", 15, "NEW", "PENDING", None),
+      ]
+      for p in demo_pos:
+        conn.execute(
+            text(
+                "INSERT INTO purchase_orders (po_no, buyer, qty, sale_status, loading_status, allocated_details, created_at) VALUES (:po, :buyer, :qty, :sale, :load, :alloc, :time) ON CONFLICT (po_no) DO NOTHING"
+            ),
+            {
+                "po": p[0],
+                "buyer": p[1],
+                "qty": p[2],
+                "sale": p[3],
+                "load": p[4],
+                "alloc": p[5],
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            },
         )
-    """)
-
-  # Auto-migration / Schema checks for old databases
-  cursor.execute("PRAGMA table_info(bulks)")
-  bulk_cols = [col[1] for col in cursor.fetchall()]
-  if "status" not in bulk_cols:
-    cursor.execute("ALTER TABLE bulks ADD COLUMN status TEXT DEFAULT 'ACCEPTED'")
-  if "decline_reason" not in bulk_cols:
-    cursor.execute("ALTER TABLE bulks ADD COLUMN decline_reason TEXT")
-
-  cursor.execute("PRAGMA table_info(purchase_orders)")
-  po_cols = [col[1] for col in cursor.fetchall()]
-  if "sale_status" not in po_cols:
-    cursor.execute("ALTER TABLE purchase_orders ADD COLUMN sale_status TEXT DEFAULT 'NEW'")
-  if "loading_status" not in po_cols:
-    cursor.execute("ALTER TABLE purchase_orders ADD COLUMN loading_status TEXT DEFAULT 'PENDING'")
-  if "allocated_details" not in po_cols:
-    cursor.execute("ALTER TABLE purchase_orders ADD COLUMN allocated_details TEXT")
-
-  # Seed Demo Data if bulks/POs are empty
-  cursor.execute("SELECT COUNT(*) FROM bulks")
-  if cursor.fetchone()[0] == 0:
-    demo_bulks = [
-        ("BLK#001", 20, "ACCEPTED", None),
-        ("BLK#002", 30, "ACCEPTED", None),
-        ("BLK#003", 25, "SENT", None),
-    ]
-    cursor.executemany(
-        "INSERT OR IGNORE INTO bulks (blk_no, qty, status, decline_reason, created_at) VALUES (?, ?, ?, ?, ?)",
-        [(b[0], b[1], b[2], b[3], datetime.now().strftime("%Y-%m-%d %H:%M")) for b in demo_bulks],
-    )
-
-  cursor.execute("SELECT COUNT(*) FROM purchase_orders")
-  if cursor.fetchone()[0] == 0:
-    demo_pos = [
-        ("1240", "Acme Corp", 10, "ACCEPTED", "PENDING", None),
-        ("1241", "Global Traders", 10, "ACCEPTED", "PENDING", None),
-        ("1242", "Beta Industries", 15, "NEW", "PENDING", None),
-    ]
-    cursor.executemany(
-        """INSERT OR IGNORE INTO purchase_orders 
-           (po_no, buyer, qty, sale_status, loading_status, allocated_details, created_at) 
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        [(p[0], p[1], p[2], p[3], p[4], p[5], datetime.now().strftime("%Y-%m-%d %H:%M")) for p in demo_pos],
-    )
-
-  conn.commit()
-  conn.close()
 
 
 init_db()
-
-st.set_page_config(page_title="Supply Chain Portal", layout="wide")
 
 # Session State for Staff Login
 if "staff_logged_in" not in st.session_state:
@@ -99,6 +123,7 @@ if "staff_logged_in" not in st.session_state:
 # ---------------------------------------------------------
 # SIDEBAR - STAFF LOGIN / SESSION CONTROL
 # ---------------------------------------------------------
+st.sidebar.markdown("---")
 st.sidebar.title("🔐 Staff Portal Access")
 if not st.session_state.staff_logged_in:
   st.sidebar.markdown("Buyers do not need to login. Use below for **Sale, Production, Warehouse & Gatekeeper**.")
@@ -107,7 +132,6 @@ if not st.session_state.staff_logged_in:
     login_btn = st.form_submit_button("Staff Login")
 
     if login_btn:
-      # Shared password for all internal departments
       if staff_pass == "pass123":
         st.session_state.staff_logged_in = True
         st.success("Staff login successful!")
@@ -124,10 +148,9 @@ else:
 # ---------------------------------------------------------
 # MAIN APP NAVIGATION & TABS
 # ---------------------------------------------------------
-st.title("📦 Integrated Supply Chain Portal")
+st.title("📦 Integrated Supply Chain Portal (Cloud)")
 
 if st.session_state.staff_logged_in:
-  # Staff see Buyer Portal + All Department Tabs + Editable DB
   tab_buyer, tab_prod, tab_wh, tab_sale, tab_load, tab_admin = st.tabs([
       "🛒 Buyer Portal (Open)",
       "🏭 Production",
@@ -137,22 +160,19 @@ if st.session_state.staff_logged_in:
       "🛠️ Editable Database",
   ])
 else:
-  # Non-staff (Public/Buyers) only see the open Buyer Portal
   tab_buyer, = st.tabs(["🛒 Buyer Portal (Open)"])
 
 # ---------------------------------------------------------
-# 1. BUYER PORTAL (OPEN TO ALL - NO LOGIN REQUIRED)
+# 1. BUYER PORTAL (OPEN TO ALL)
 # ---------------------------------------------------------
 with tab_buyer:
   st.header("🛒 Buyer Order Tracking Portal")
-  st.markdown("Welcome! You can track your purchase orders and live dispatch status here without logging in.")
+  st.markdown("Welcome! Track your purchase orders and live dispatch status here without logging in.")
 
-  conn = get_connection()
   buyer_df = pd.read_sql(
       "SELECT po_no, buyer, qty, sale_status, loading_status, allocated_details FROM purchase_orders",
-      conn,
+      engine,
   )
-  conn.close()
 
   if not buyer_df.empty:
     display_data = []
@@ -200,25 +220,27 @@ if st.session_state.staff_logged_in:
         if new_blk_no.strip() == "":
           st.error("Bulk Number cannot be empty.")
         else:
-          conn = get_connection()
-          cursor = conn.cursor()
           try:
-            cursor.execute(
-                "INSERT INTO bulks (blk_no, qty, status, created_at) VALUES (?, ?, 'SENT', ?)",
-                (new_blk_no.strip(), new_blk_qty, datetime.now().strftime("%Y-%m-%d %H:%M")),
-            )
-            conn.commit()
+            with engine.begin() as conn:
+              conn.execute(
+                  text(
+                      "INSERT INTO bulks (blk_no, qty, status, created_at) VALUES (:blk, :qty, 'SENT', :time)"
+                  ),
+                  {
+                      "blk": new_blk_no.strip(),
+                      "qty": new_blk_qty,
+                      "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                  },
+              )
             st.success(f"Bulk {new_blk_no} sent to Warehouse successfully!")
             st.rerun()
-          except sqlite3.IntegrityError:
-            st.error(f"Bulk Number {new_blk_no} already exists.")
-          finally:
-            conn.close()
+          except Exception as e:
+            st.error(f"Error or Bulk Number {new_blk_no} already exists: {e}")
 
     st.subheader("Dispatched Bulks Status")
-    conn = get_connection()
-    bulks_df = pd.read_sql("SELECT blk_no, qty, status, decline_reason, created_at FROM bulks", conn)
-    conn.close()
+    bulks_df = pd.read_sql(
+        "SELECT blk_no, qty, status, decline_reason, created_at FROM bulks", engine
+    )
 
     if not bulks_df.empty:
       for idx, row in bulks_df.iterrows():
@@ -238,13 +260,13 @@ if st.session_state.staff_logged_in:
           if status == "DECLINED":
             c4.write(f"Reason: *{row['decline_reason'] or 'No reason provided'}*")
             if st.button(f"Re-send {row['blk_no']}", key=f"resend_{row['blk_no']}_{idx}"):
-              conn = get_connection()
-              conn.execute(
-                  "UPDATE bulks SET status = 'SENT', decline_reason = NULL WHERE blk_no = ?",
-                  (row["blk_no"],),
-              )
-              conn.commit()
-              conn.close()
+              with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE bulks SET status = 'SENT', decline_reason = NULL WHERE blk_no = :blk"
+                    ),
+                    {"blk": row["blk_no"]},
+                )
               st.success(f"Bulk {row['blk_no']} re-sent to Warehouse!")
               st.rerun()
           elif status == "SENT":
@@ -261,12 +283,10 @@ if st.session_state.staff_logged_in:
     st.header("Warehouse - Incoming Bulks & Inventory")
 
     st.subheader("Incoming Bulks Inspection")
-    conn = get_connection()
     sent_bulks = pd.read_sql(
         "SELECT id, blk_no, qty, status, decline_reason FROM bulks WHERE status = 'SENT'",
-        conn,
+        engine,
     )
-    conn.close()
 
     if not sent_bulks.empty:
       for _, row in sent_bulks.iterrows():
@@ -274,22 +294,23 @@ if st.session_state.staff_logged_in:
           col1, col2 = st.columns(2)
           with col1:
             if st.button("Accept Bulk", key=f"acc_{row['id']}"):
-              conn = get_connection()
-              conn.execute("UPDATE bulks SET status = 'ACCEPTED' WHERE id = ?", (row["id"],))
-              conn.commit()
-              conn.close()
+              with engine.begin() as conn:
+                conn.execute(
+                    text("UPDATE bulks SET status = 'ACCEPTED' WHERE id = :id"),
+                    {"id": row["id"]},
+                )
               st.success(f"Bulk {row['blk_no']} accepted into stock!")
               st.rerun()
           with col2:
             decline_reason = st.text_input("Decline Reason (Optional)", key=f"dec_reason_{row['id']}")
             if st.button("Decline Bulk", key=f"dec_{row['id']}"):
-              conn = get_connection()
-              conn.execute(
-                  "UPDATE bulks SET status = 'DECLINED', decline_reason = ? WHERE id = ?",
-                  (decline_reason, row["id"]),
-              )
-              conn.commit()
-              conn.close()
+              with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE bulks SET status = 'DECLINED', decline_reason = :reason WHERE id = :id"
+                    ),
+                    {"reason": decline_reason, "id": row["id"]},
+                )
               st.warning(f"Bulk {row['blk_no']} declined.")
               st.rerun()
     else:
@@ -297,9 +318,10 @@ if st.session_state.staff_logged_in:
 
     st.divider()
     st.subheader("Current Accepted Stock (FIFO Pool)")
-    conn = get_connection()
-    accepted_df = pd.read_sql("SELECT blk_no, qty FROM bulks WHERE status = 'ACCEPTED' ORDER BY blk_no ASC", conn)
-    conn.close()
+    accepted_df = pd.read_sql(
+        "SELECT blk_no, qty FROM bulks WHERE status = 'ACCEPTED' ORDER BY blk_no ASC",
+        engine,
+    )
     if not accepted_df.empty:
       st.dataframe(accepted_df, use_container_width=True)
       total_avail = accepted_df["qty"].sum()
@@ -327,31 +349,29 @@ if st.session_state.staff_logged_in:
         if po_no.strip() == "" or buyer_name.strip() == "":
           st.error("Please fill in all PO details.")
         else:
-          conn = get_connection()
-          cursor = conn.cursor()
           try:
-            cursor.execute(
-                """INSERT INTO purchase_orders (po_no, buyer, qty, sale_status, loading_status, created_at) 
-                   VALUES (?, ?, ?, 'NEW', 'PENDING', ?)""",
-                (
-                    po_no.strip(),
-                    buyer_name.strip(),
-                    po_qty,
-                    datetime.now().strftime("%Y-%m-%d %H:%M"),
-                ),
-            )
-            conn.commit()
+            with engine.begin() as conn:
+              conn.execute(
+                  text(
+                      "INSERT INTO purchase_orders (po_no, buyer, qty, sale_status, loading_status, created_at) VALUES (:po, :buyer, :qty, 'NEW', 'PENDING', :time)"
+                  ),
+                  {
+                      "po": po_no.strip(),
+                      "buyer": buyer_name.strip(),
+                      "qty": po_qty,
+                      "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                  },
+              )
             st.success(f"PO {po_no} created successfully!")
             st.rerun()
-          except sqlite3.IntegrityError:
-            st.error(f"PO Number {po_no} already exists.")
-          finally:
-            conn.close()
+          except Exception as e:
+            st.error(f"Error or PO Number {po_no} already exists: {e}")
 
     st.subheader("Manage Purchase Orders")
-    conn = get_connection()
-    po_df = pd.read_sql("SELECT id, po_no, buyer, qty, sale_status, loading_status FROM purchase_orders", conn)
-    conn.close()
+    po_df = pd.read_sql(
+        "SELECT id, po_no, buyer, qty, sale_status, loading_status FROM purchase_orders",
+        engine,
+    )
 
     if not po_df.empty:
       for _, row in po_df.iterrows():
@@ -364,18 +384,20 @@ if st.session_state.staff_logged_in:
         with cols[4]:
           if row["sale_status"] != "ACCEPTED":
             if st.button("Accept", key=f"po_acc_{row['id']}"):
-              conn = get_connection()
-              conn.execute("UPDATE purchase_orders SET sale_status = 'ACCEPTED' WHERE id = ?", (row["id"],))
-              conn.commit()
-              conn.close()
+              with engine.begin() as conn:
+                conn.execute(
+                    text("UPDATE purchase_orders SET sale_status = 'ACCEPTED' WHERE id = :id"),
+                    {"id": row["id"]},
+                )
               st.success(f"PO {row['po_no']} accepted and sent to Warehouse!")
               st.rerun()
           if row["sale_status"] != "PENDING":
             if st.button("Pending", key=f"po_pend_{row['id']}"):
-              conn = get_connection()
-              conn.execute("UPDATE purchase_orders SET sale_status = 'PENDING' WHERE id = ?", (row["id"],))
-              conn.commit()
-              conn.close()
+              with engine.begin() as conn:
+                conn.execute(
+                    text("UPDATE purchase_orders SET sale_status = 'PENDING' WHERE id = :id"),
+                    {"id": row["id"]},
+                )
               st.info(f"PO {row['po_no']} put on Pending hold.")
               st.rerun()
     else:
@@ -388,12 +410,10 @@ if st.session_state.staff_logged_in:
     st.header("Truck Loading & OGP Generation (Gatekeeper)")
     st.markdown("Orders accepted by the Sale Office can be loaded. Allocation strictly follows the lowest **BLK#** first.")
 
-    conn = get_connection()
     ready_pos = pd.read_sql(
         "SELECT id, po_no, buyer, qty, loading_status FROM purchase_orders WHERE sale_status = 'ACCEPTED' AND loading_status != 'CLEAR'",
-        conn,
+        engine,
     )
-    conn.close()
 
     if not ready_pos.empty:
       selected_po_no = st.selectbox("Select PO to Load onto Truck", ready_pos["po_no"].tolist())
@@ -402,10 +422,9 @@ if st.session_state.staff_logged_in:
       st.write(f"**Buyer:** {po_row['buyer']} | **Required Qty:** {po_row['qty']} Bags")
 
       if st.button("Attempt Truck Loading"):
-        conn = get_connection()
         bulks_stock = pd.read_sql(
             "SELECT id, blk_no, qty FROM bulks WHERE status = 'ACCEPTED' ORDER BY blk_no ASC",
-            conn,
+            engine,
         )
 
         needed_qty = po_row["qty"]
@@ -439,19 +458,22 @@ if st.session_state.staff_logged_in:
 
           split_str = " + ".join(allocation)
 
-          cursor = conn.cursor()
-          for new_qty, b_id in bulks_to_update:
-            if new_qty == 0:
-              cursor.execute("DELETE FROM bulks WHERE id = ?", (b_id,))
-            else:
-              cursor.execute("UPDATE bulks SET qty = ? WHERE id = ?", (new_qty, b_id))
+          with engine.begin() as conn:
+            for new_qty, b_id in bulks_to_update:
+              if new_qty == 0:
+                conn.execute(text("DELETE FROM bulks WHERE id = :id"), {"id": b_id})
+              else:
+                conn.execute(
+                    text("UPDATE bulks SET qty = :qty WHERE id = :id"),
+                    {"qty": new_qty, "id": b_id},
+                )
 
-          cursor.execute(
-              "UPDATE purchase_orders SET loading_status = 'CLEAR', allocated_details = ? WHERE id = ?",
-              (split_str, po_row["id"]),
-          )
-          conn.commit()
-          conn.close()
+            conn.execute(
+                text(
+                    "UPDATE purchase_orders SET loading_status = 'CLEAR', allocated_details = :alloc WHERE id = :id"
+                ),
+                {"alloc": split_str, "id": po_row["id"]},
+            )
 
           st.success("🚚 Truck Loaded Successfully!")
           st.balloons()
@@ -462,12 +484,10 @@ if st.session_state.staff_logged_in:
 
     st.divider()
     st.subheader("Loading History & OGP Log")
-    conn = get_connection()
     loaded_df = pd.read_sql(
         "SELECT po_no, buyer, qty, allocated_details FROM purchase_orders WHERE loading_status = 'CLEAR'",
-        conn,
+        engine,
     )
-    conn.close()
     if not loaded_df.empty:
       st.dataframe(loaded_df, use_container_width=True)
     else:
@@ -478,24 +498,19 @@ if st.session_state.staff_logged_in:
   # ---------------------------------------------------------
   with tab_admin:
     st.header("Database Administration & Editable Tables")
-    st.markdown("Directly view and edit SQLite database tables (`bulks`, `purchase_orders`).")
+    st.markdown("Directly view and edit database tables (`bulks`, `purchase_orders`).")
 
     table_choice = st.selectbox("Select Database Table to Edit", ["bulks", "purchase_orders"])
 
-    conn = get_connection()
-    table_df = pd.read_sql(f"SELECT * FROM {table_choice}", conn)
-    conn.close()
+    table_df = pd.read_sql(f"SELECT * FROM {table_choice}", engine)
 
     st.markdown(f"**Editing `{table_choice}` table directly:**")
     edited_df = st.data_editor(table_df, num_rows="dynamic", use_container_width=True, key=f"editor_{table_choice}")
 
     if st.button("Save Changes to Database"):
-      conn = get_connection()
       try:
-        edited_df.to_sql(table_choice, conn, if_exists="replace", index=False)
-        st.success(f"Table `{table_choice}` successfully updated and saved to SQLite DB!")
+        edited_df.to_sql(table_choice, engine, if_exists="replace", index=False)
+        st.success(f"Table `{table_choice}` successfully updated and saved to Supabase PostgreSQL!")
         st.rerun()
       except Exception as e:
         st.error(f"Error saving changes: {e}")
-      finally:
-        conn.close()
